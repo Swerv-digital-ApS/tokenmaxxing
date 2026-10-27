@@ -20,7 +20,7 @@ ORG_FEED_SECRETS=swerv:<secret>,other:<secret>
 
 - Never commit a secret. Leave the variable unset to disable the feed (every call is `401`).
 - `orgId` matches `^[a-z0-9][a-z0-9-]{0,31}$`. It is lowercased.
-- The secret is everything after the first colon, at least 32 characters.
+- The secret is everything after the first colon, 32 to 256 characters, and must not contain a comma.
 - One secret per organization. A repeated org id or a repeated secret fails boot.
 - The secret is the credential. The body does not name the organization. A wrong secret is `401`,
   including when the variable is unset. The response does not say which.
@@ -96,18 +96,18 @@ Same `400` / `401` / `415` / `429` as link.
 
 | Field | Rule |
 |---|---|
-| `events` | 0 to 1000 objects. The whole batch is checked before anything is written |
+| `events` | 0 to 1000 objects, and at most 32 distinct emails. The whole batch is checked before anything is written |
 | `email` | As on link |
 | `source` | `claude_cloud` or `codex_cloud`. See the source rules below |
 | `id` | 1 to 200 printable ASCII characters (`!` through `~`). Stable for that turn. Unique per player |
 | `timestamp` | Unix milliseconds, an integer, not more than one hour in the future |
-| `model` | A string. Names that aren't model-shaped are stored as `unknown` and still count. An assistant row needs a non-empty model |
+| `model` | A string. Names that aren't model-shaped are stored as `unknown` and still count. An assistant row needs a non-empty model. An email-shaped name is rejected: model names are public |
 | `inputTokens`, `outputTokens` | Integers, 0 to 1,000,000,000 |
 | `cacheCreationTokens`, `cacheReadTokens` | Same, or omit them for 0 |
 | `reasoningTokens` | Same, or omit / `null` |
 | `costCents` | Do not send it. It is ignored. The server prices the model |
 
-The body is at most 1,000,000 bytes (`413` `{ "error": "too_large" }`). Unknown fields are ignored.
+The body is at most 1,000,000 bytes (`413` `{ "error": "too_large" }`), whether or not `Content-Length` is set. The bearer token is at most 256 characters. Unknown fields are ignored. A `userId` in an event is ignored; the linked email chooses the player.
 Do not send message content; it is not read and must not be relied on as stored.
 
 `200`:
@@ -182,7 +182,8 @@ Separately, a cloud row is the same turn as a local row when all of these match:
 
 The local row wins. A cloud row that arrives second is counted in `overlaps` and not stored. A
 local row that arrives second deletes the cloud row, including when the two timestamps fall on
-different world days, and that day is counted again from what remains.
+different world days, and that day is counted again from what remains. A local row whose message
+id is already stored for a different time does not delete anything: the insert would be ignored.
 
 This is a safety net. If the team analytics timestamp is more than 2 minutes away from the local
 log, both can count. Do not push usage the player's Mac already syncs. A match also requires the

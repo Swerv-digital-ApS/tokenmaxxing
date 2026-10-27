@@ -24,8 +24,8 @@ export function parseOrgFeedSecrets(raw: string | undefined): OrgFeedSecret[] {
     const orgId = trimmed.slice(0, colon).toLowerCase();
     const secret = trimmed.slice(colon + 1);
     if (!ORG_ID_RE.test(orgId)) throw new Error(`invalid ORG_FEED_SECRETS org id: ${orgId}`);
-    if (secret.length < 32) {
-      throw new Error(`ORG_FEED_SECRETS secret for ${orgId} is too short: use at least 32 characters`);
+    if (secret.length < 32 || secret.length > 256) {
+      throw new Error(`ORG_FEED_SECRETS secret for ${orgId} must be 32 to 256 characters`);
     }
     if (seen.has(orgId)) throw new Error(`ORG_FEED_SECRETS lists ${orgId} twice`);
     const hash = sha256(secret);
@@ -41,7 +41,8 @@ export function orgIdForToken(token: string, feeds: readonly OrgFeedSecret[]): s
   const got = Buffer.from(sha256(token));
   let found: string | null = null;
   for (const feed of feeds) {
-    if (timingSafeEqual(got, Buffer.from(feed.hash))) found = feed.orgId;
+    const expect = Buffer.from(feed.hash);
+    if (expect.length === got.length && timingSafeEqual(got, expect)) found = feed.orgId;
   }
   return found;
 }

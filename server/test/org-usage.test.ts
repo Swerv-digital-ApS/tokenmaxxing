@@ -31,14 +31,14 @@ async function db() {
     source TEXT NOT NULL, message_type TEXT NOT NULL, model TEXT NOT NULL,
     input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
     cache_creation_tokens INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL,
-    timestamp INTEGER NOT NULL, day TEXT NOT NULL, message_id TEXT NOT NULL)`);
+    timestamp INTEGER NOT NULL, day TEXT NOT NULL, message_id TEXT NOT NULL, request_id TEXT)`);
   return sql;
 }
 
 async function insert(sql: Awaited<ReturnType<typeof db>>, e: TokenEvent, day = "2026-01-01") {
   await sql.execute(
     `INSERT INTO events (source, message_type, model, input_tokens, output_tokens, cache_creation_tokens,
-      cache_read_tokens, timestamp, day, message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      cache_read_tokens, timestamp, day, message_id, request_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     e.source,
     e.messageType,
     e.model,
@@ -49,6 +49,7 @@ async function insert(sql: Awaited<ReturnType<typeof db>>, e: TokenEvent, day = 
     e.timestamp,
     day,
     e.messageId,
+    e.requestId,
   );
 }
 
@@ -83,6 +84,32 @@ describe("organization overlap", () => {
     expect(gone.deletedAt).toEqual([T]);
     const left = await sql.execute("SELECT source FROM events");
     expect(left).toHaveLength(0);
+  });
+
+  test("a replay of some other message does not delete the cloud row", async () => {
+    const sql = await db();
+    await insert(sql, ev({ timestamp: T }));
+    await insert(
+      sql,
+      ev({ source: "claude_code", messageId: "older", timestamp: T - 60 * 60_000 }),
+      "2025-12-31",
+    );
+    const replay = await reconcileOrgUsage(sql, [
+      ev({ source: "claude_code", messageId: "older", timestamp: T }),
+    ]);
+    expect(replay.deletedAt).toEqual([]);
+    const left = await sql.execute("SELECT source FROM events WHERE source = 'claude_cloud'");
+    expect(left).toHaveLength(1);
+  });
+
+  test("a replay of the same local turn still drops the cloud duplicate", async () => {
+    const sql = await db();
+    await insert(sql, ev({ timestamp: T }));
+    await insert(sql, ev({ source: "claude_code", messageId: "same", timestamp: T }));
+    const replay = await reconcileOrgUsage(sql, [
+      ev({ source: "claude_code", messageId: "same", timestamp: T }),
+    ]);
+    expect(replay.deletedAt).toEqual([T]);
   });
 
   test("codex cloud matches codex, not claude", async () => {

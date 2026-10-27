@@ -171,7 +171,7 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
   picks up where it stopped on its next run, so a big first sync is delayed, never lost.
 - `claude_cloud` and `codex_cloud` are not accepted from a device. They arrive only from the organization
   feed (`docs/org-usage-feed.md`): an opted-in player, bearer token in `ORG_FEED_SECRETS`, idempotent
-  `org:<orgId>:<id>` message ids. A cloud row with the same model and token counts as a local
+  `org:<orgId>:<id>` message ids, at most 32 players a request. A cloud row with the same model and token counts as a local
   `claude_code` / `claude_cowork` / `codex` row within two minutes is dropped, and a later local row
   deletes the cloud row. The day cap still applies; the device's per-minute ingest limit does not.
 

@@ -8,6 +8,10 @@ import { parseEvent } from "./validate.ts";
 
 /** Bytes. A request of 1000 events fits; anything larger is refused before it is parsed as events. */
 export const ORG_FEED_MAX_BYTES = 1_000_000;
+/** Bearer secrets are at least 32 characters. Longer than this is refused before it is hashed. */
+export const ORG_FEED_MAX_BEARER = 256;
+/** One request may name this many linked players. More would wake that many player actors. */
+export const ORG_FEED_MAX_PLAYERS = 32;
 const REQUESTS_PER_MIN = 60;
 
 const DEVICE_SOURCES = new Set([
@@ -67,23 +71,55 @@ function fail(status: number, error: string, extra?: Record<string, unknown>): R
   return json({ error, ...extra }, status);
 }
 
-/** Bearer token, or null. The token is not logged. */
+/** Bearer token, or null. The token is not logged. An oversized header is treated as absent. */
 export function bearer(req: Request): string | null {
   const header = req.headers.get("authorization");
-  if (!header) return null;
+  if (!header || header.length > ORG_FEED_MAX_BEARER + "Bearer ".length) return null;
   const match = /^Bearer ([^\s]+)$/.exec(header);
-  return match?.[1] ?? null;
+  const token = match?.[1];
+  if (!token || token.length > ORG_FEED_MAX_BEARER) return null;
+  return token;
+}
+
+/**
+ * Per client IP, including requests that fail auth. The org's own limit applies only after the
+ * secret matches, so this is what stops an open flood of the route.
+ */
+export function orgIpGuard(ip: string, limiter: RateLimiter, now = Date.now()): Response | null {
+  if (!limiter.take(ip || "unknown", now)) return fail(429, "rate_limited");
+  return null;
 }
 
 async function readBody(req: Request): Promise<{ raw: string } | Response> {
   if (req.method !== "POST") return fail(405, "method_not_allowed");
   const type = req.headers.get("content-type") ?? "";
   if (!type.toLowerCase().startsWith("application/json")) return fail(415, "unsupported_type");
-  const length = Number(req.headers.get("content-length") ?? "0");
-  if (Number.isFinite(length) && length > ORG_FEED_MAX_BYTES) return fail(413, "too_large");
-  const raw = await req.text();
-  if (raw.length > ORG_FEED_MAX_BYTES) return fail(413, "too_large");
-  return { raw };
+  const declared = req.headers.get("content-length");
+  if (declared !== null) {
+    const length = Number(declared);
+    if (!Number.isSafeInteger(length) || length < 0 || length > ORG_FEED_MAX_BYTES)
+      return fail(413, "too_large");
+  }
+  const stream = req.body;
+  if (!stream) return { raw: "" };
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > ORG_FEED_MAX_BYTES) {
+        await reader.cancel();
+        return fail(413, "too_large");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return { raw: new TextDecoder().decode(chunks.length === 1 ? chunks[0] : Buffer.concat(chunks)) };
 }
 
 function authed(req: Request, deps: OrgFeedDeps): { orgId: string } | Response {
@@ -116,6 +152,7 @@ function parseFeedEvents(raw: unknown, orgId: string, now: number): Parsed {
     return { ok: false, status: 400, body: { error: "invalid_body" } };
   if (raw.events.length > 1000) return { ok: false, status: 400, body: { error: "invalid_body" } };
   const events: FeedEvent[] = [];
+  const players = new Set<string>();
   let deviceSync = 0;
   for (let index = 0; index < raw.events.length; index++) {
     const item = raw.events[index];
@@ -138,6 +175,14 @@ function parseFeedEvents(raw: unknown, orgId: string, now: number): Parsed {
     if (typeof row.id !== "string" || !/^[\x21-\x7e]{1,200}$/.test(row.id)) {
       return { ok: false, status: 400, body: { error: "invalid_event", index, field: "id" } };
     }
+    // Model names are shown on the public card. An email-shaped one would publish the address.
+    if (typeof row.model === "string" && parseFeedEmail(row.model)) {
+      return { ok: false, status: 400, body: { error: "invalid_event", index, field: "model" } };
+    }
+    if (players.size >= ORG_FEED_MAX_PLAYERS && !players.has(email)) {
+      return { ok: false, status: 400, body: { error: "invalid_body" } };
+    }
+    players.add(email);
     const parsed = parseEvent(
       {
         source: row.source,
@@ -188,10 +233,15 @@ export async function handleOrgLink(req: Request, deps: OrgFeedDeps): Promise<Re
   const email = parseFeedEmail(got.body.email);
   if (typeof code !== "string" || !ORG_CLAIM_CODE_RE.test(code)) return fail(400, "invalid_body");
   if (!email) return fail(400, "invalid_body");
-  const result = await deps.bind(got.orgId, code, email);
-  if (result === "not_found") return fail(404, "claim_not_found");
-  if (result === "taken") return fail(409, "email_taken");
-  return json({ linked: true });
+  try {
+    const result = await deps.bind(got.orgId, code, email);
+    if (result === "not_found") return fail(404, "claim_not_found");
+    if (result === "taken") return fail(409, "email_taken");
+    return json({ linked: true });
+  } catch {
+    console.error("[org-feed] link failed");
+    return fail(500, "link_failed");
+  }
 }
 
 /** `POST /api/v1/org-usage/unlink` */
@@ -201,7 +251,12 @@ export async function handleOrgUnlink(req: Request, deps: OrgFeedDeps): Promise<
   if (!versioned(got.body)) return fail(400, "invalid_body");
   const email = parseFeedEmail(got.body.email);
   if (!email) return fail(400, "invalid_body");
-  return json({ unlinked: await deps.unlink(got.orgId, email) });
+  try {
+    return json({ unlinked: await deps.unlink(got.orgId, email) });
+  } catch {
+    console.error("[org-feed] unlink failed");
+    return fail(500, "unlink_failed");
+  }
 }
 
 /**
@@ -226,7 +281,24 @@ export async function handleOrgUsage(req: Request, deps: OrgFeedDeps): Promise<R
   let unlinked = 0;
   let rateLimited = 0;
   for (const [email, events] of byEmail) {
-    const userId = await deps.playerForEmail(got.orgId, email);
+    let userId: number | null;
+    try {
+      userId = await deps.playerForEmail(got.orgId, email);
+    } catch {
+      console.error("[org-feed] lookup failed");
+      return json(
+        {
+          error: "ingest_failed",
+          inserted,
+          duplicates,
+          overlaps,
+          unlinked,
+          deviceSync: parsed.deviceSync,
+          rateLimited,
+        },
+        500,
+      );
+    }
     if (userId === null) {
       unlinked += events.length;
       continue;

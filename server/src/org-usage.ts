@@ -1,6 +1,6 @@
 import { ORG_OVERLAP_MS, type OrgFeedSource } from "@tokenmaxxing/core/org-feed.ts";
 import type { Source, TokenEvent } from "@tokenmaxxing/core/types.ts";
-import type { Sql } from "./actors/shared.ts";
+import { one, type Sql } from "./actors/shared.ts";
 
 /** Local sources that already count the same turn a cloud row would repeat. */
 const LOCAL: Record<OrgFeedSource, readonly Source[]> = {
@@ -22,6 +22,23 @@ function turnArgs(e: TokenEvent): unknown[] {
   const from = e.timestamp - ORG_OVERLAP_MS;
   const to = e.timestamp + ORG_OVERLAP_MS;
   return [e.model, e.inputTokens, e.outputTokens, e.cacheCreationTokens, e.cacheReadTokens, from, to];
+}
+
+/**
+ * When this local row was already stored, if it was. A replay of some other message must not delete
+ * a cloud row: the insert would be ignored and the tokens would be gone.
+ */
+async function storedAt(sql: Sql, e: TokenEvent): Promise<number | null> {
+  const row = await one<{ timestamp: number }>(
+    sql,
+    `SELECT timestamp FROM events
+     WHERE source = ? AND message_id = ? AND COALESCE(request_id, '') = ? AND message_type = ? LIMIT 1`,
+    e.source,
+    e.messageId,
+    e.requestId ?? "",
+    e.messageType,
+  );
+  return row?.timestamp ?? null;
 }
 
 /**
@@ -53,6 +70,8 @@ export async function reconcileOrgUsage(
     kept.push(e);
     const cloud = CLOUD_OF[e.source];
     if (!cloud || e.messageType !== "assistant") continue;
+    const already = await storedAt(sql, e);
+    if (already !== null && Math.abs(already - e.timestamp) > ORG_OVERLAP_MS) continue;
     const gone = (await sql.execute(
       `DELETE FROM events WHERE source = ? AND ${sameTurn} RETURNING timestamp, day`,
       cloud,

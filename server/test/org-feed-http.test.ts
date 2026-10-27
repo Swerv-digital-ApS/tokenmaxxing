@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import type { TokenEvent } from "@tokenmaxxing/core/types.ts";
 import { loadConfig } from "../src/config.ts";
-import { handleOrgLink, handleOrgUnlink, handleOrgUsage, type OrgFeedDeps } from "../src/org-feed-http.ts";
+import {
+  handleOrgLink,
+  handleOrgUnlink,
+  handleOrgUsage,
+  ORG_FEED_MAX_PLAYERS,
+  type OrgFeedDeps,
+  orgIpGuard,
+} from "../src/org-feed-http.ts";
 import { orgIdForToken, parseOrgFeedSecrets } from "../src/org-feed-secrets.ts";
 import { RateLimiter } from "../src/rate-limit.ts";
 
@@ -59,8 +66,9 @@ describe("ORG_FEED_SECRETS", () => {
   test("unset is off, and a bad value fails", () => {
     expect(parseOrgFeedSecrets(undefined)).toEqual([]);
     expect(parseOrgFeedSecrets("  ")).toEqual([]);
-    expect(() => parseOrgFeedSecrets("swerv:short")).toThrow(/too short/);
-    expect(() => parseOrgFeedSecrets("Swerv:short")).toThrow(/too short/);
+    expect(() => parseOrgFeedSecrets("swerv:short")).toThrow(/32 to 256/);
+    expect(() => parseOrgFeedSecrets("Swerv:short")).toThrow(/32 to 256/);
+    expect(() => parseOrgFeedSecrets(`swerv:${"a".repeat(257)}`)).toThrow(/32 to 256/);
     expect(() => parseOrgFeedSecrets(`Bad_Id:${SECRET}`)).toThrow(/org id/);
     expect(() => parseOrgFeedSecrets(`swerv:${SECRET},swerv:${OTHER}`)).toThrow(/twice/);
     expect(() => parseOrgFeedSecrets(`swerv:${SECRET},other:${SECRET}`)).toThrow(/reuses a secret/);
@@ -167,6 +175,63 @@ describe("POST /api/v1/org-usage", () => {
     );
     expect(res.status).toBe(500);
     expect(await res.json()).toMatchObject({ error: "ingest_failed", inserted: 1 });
+  });
+
+  test("an email-shaped model is refused, a dated model name is kept, and a userId is ignored", async () => {
+    const d = deps();
+    const leaked = await handleOrgUsage(
+      post({ version: 1, events: [row({ model: "dev@swerv.example" })] }),
+      d,
+    );
+    expect(await leaked.json()).toEqual({ error: "invalid_event", index: 0, field: "model" });
+    expect(d.seen).toHaveLength(0);
+    const dated = await handleOrgUsage(
+      post({ version: 1, events: [row({ model: "claude-opus-4@20250514", userId: 999 })] }),
+      d,
+    );
+    expect(dated.status).toBe(200);
+    expect(d.seen[0]?.model).toBe("claude-opus-4@20250514");
+  });
+
+  test("more players than one request may wake is refused before ingest", async () => {
+    const d = deps();
+    const events = Array.from({ length: ORG_FEED_MAX_PLAYERS + 1 }, (_, i) =>
+      row({ id: `id-${i}`, email: `p${i}@swerv.example` }),
+    );
+    const res = await handleOrgUsage(post({ version: 1, events }), d);
+    expect(res.status).toBe(400);
+    expect(d.seen).toHaveLength(0);
+  });
+
+  test("a bearer longer than 256 characters is unauthorized and is not hashed into an error", async () => {
+    const token = "b".repeat(257);
+    const res = await handleOrgUsage(post({ version: 1, events: [] }, token), deps());
+    expect(res.status).toBe(401);
+    expect(JSON.stringify(await res.json())).not.toContain(token);
+  });
+
+  test("a body with no declared length still stops at 1MB", async () => {
+    const d = deps();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("x".repeat(1_000_001)));
+        controller.close();
+      },
+    });
+    const req = new Request("http://127.0.0.1/api/v1/org-usage", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${SECRET}` },
+      body: stream,
+    });
+    expect((await handleOrgUsage(req, d)).status).toBe(413);
+    expect(d.seen).toHaveLength(0);
+  });
+
+  test("failed attempts from one address are limited before the secret is checked", () => {
+    const limiter = new RateLimiter(1, 60_000);
+    expect(orgIpGuard("10.0.0.1", limiter, NOW)).toBeNull();
+    expect(orgIpGuard("10.0.0.1", limiter, NOW)?.status).toBe(429);
+    expect(orgIpGuard("10.0.0.2", limiter, NOW)).toBeNull();
   });
 
   test("oversized, non-json, and a burst are refused", async () => {

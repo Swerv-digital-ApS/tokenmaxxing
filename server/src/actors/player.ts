@@ -633,6 +633,8 @@ export async function migrateEvents(d: Sql): Promise<void> {
     ON events (source, message_id, COALESCE(request_id, ''), message_type)`);
   await d.execute("CREATE INDEX IF NOT EXISTS events_day ON events (day, message_type)");
   await d.execute("CREATE INDEX IF NOT EXISTS events_time ON events (timestamp)");
+  // Cloud overlap looks up one source across a two-minute window.
+  await d.execute("CREATE INDEX IF NOT EXISTS events_source_time ON events (source, timestamp)");
   // Recent activity and MAX(timestamp) must not read a player's entire history.
   await d.execute(`CREATE INDEX IF NOT EXISTS events_assistant_time
     ON events (timestamp, session_id, agent_id) WHERE message_type = 'assistant'`);

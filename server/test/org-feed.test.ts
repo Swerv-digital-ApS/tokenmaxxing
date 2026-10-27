@@ -210,6 +210,37 @@ describe("organization feed", () => {
     await expect(a.town.startOrgClaim("not-configured")).rejects.toThrow(/no usage feed/);
   });
 
+  test("another player's local row cannot erase this cloud usage, and the card has no email", async () => {
+    const a = await signUp("orgpriv");
+    const b = await signUp("orgprivb");
+    const email = `priv${a.userId}@swerv.example`;
+    const claim = await a.town.startOrgClaim("swerv");
+    expect((await feed("/api/v1/org-usage/link", { version: 1, code: claim.code, email })).body).toEqual({
+      linked: true,
+    });
+    const ts = onToday(60_000);
+    await feed("/api/v1/org-usage", {
+      version: 1,
+      events: [{ ...cloud(email, "mine", ts), userId: b.userId }],
+    });
+    await as(b.token)
+      .player(b.userId)
+      .ingest([
+        event({
+          timestamp: ts,
+          inputTokens: 100,
+          outputTokens: 50,
+          model: "claude-haiku-4-5-20251001",
+          messageId: "b-local",
+        }),
+      ]);
+    expect(await sources(a.token, a.userId)).toEqual([{ source: "claude_cloud", tokens: 150 }]);
+    expect(await sources(b.token, b.userId)).toEqual([{ source: "claude_code", tokens: 150 }]);
+    const card = JSON.stringify(await b.town.profile(a.userId, "7d"));
+    expect(card).not.toContain(email);
+    expect(card).not.toContain("org:");
+  });
+
   test("eleven codes in an hour is too many", async () => {
     const u = await signUp("orgcodes");
     for (let i = 0; i < 10; i++) await u.town.startOrgClaim("swerv");
