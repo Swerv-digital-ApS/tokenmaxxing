@@ -161,12 +161,22 @@ const fresh: string[] = [];
 
 /** A fresh user; names are unique per run since `town` is shared by every test. */
 export async function signUp(prefix = "u") {
-  const name = `${prefix}${Date.now().toString(36)}${n++}`;
-  const r = await from(`10.1.${Math.floor(n / 250)}.${n % 250}`)
-    .town.getOrCreate(["main"])
-    .signUp(name);
-  fresh.push(r.token);
-  return { ...r, town: client.town.getOrCreate(["main"], { params: { token: r.token } }) };
+  // A busy runner stalls the engine: creating the player actor sits for about 30s, then Rivet
+  // answers `internal_error`. `town.signUp` has already discarded that account, so a new name
+  // works. A failure that comes back quickly is a real bug and is not tried again.
+  for (let attempt = 1; ; attempt++) {
+    const started = Date.now();
+    const name = `${prefix}${Date.now().toString(36)}${n++}`;
+    try {
+      const r = await from(`10.1.${Math.floor(n / 250)}.${n % 250}`)
+        .town.getOrCreate(["main"])
+        .signUp(name);
+      fresh.push(r.token);
+      return { ...r, town: client.town.getOrCreate(["main"], { params: { token: r.token } }) };
+    } catch (err) {
+      if (attempt >= 2 || Date.now() - started < 20_000) throw err;
+    }
+  }
 }
 
 type User = Awaited<ReturnType<typeof signUp>>;
