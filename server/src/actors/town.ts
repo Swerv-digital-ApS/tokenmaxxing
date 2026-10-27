@@ -43,6 +43,7 @@ import { actor, UserError } from "rivetkit";
 import { db } from "rivetkit/db";
 import { canBrand } from "../brand.ts";
 import { placeAllNotice } from "../furniture-notices.ts";
+import { parseOrgFeedSecrets } from "../org-feed-secrets.ts";
 import { RateLimiter } from "../rate-limit.ts";
 import { pushNewRequest } from "../request-push.ts";
 import { type ActivityRow, isSortKey, type UsageRow } from "../stats.ts";
@@ -158,6 +159,16 @@ import {
   recordVisit,
   visitorCounts,
 } from "../town/offices.ts";
+import {
+  bindOrgFeed,
+  orgClaimLimiter,
+  orgFeedStatus,
+  parseOrgId,
+  playerForFeedEmail,
+  startOrgClaim,
+  unlinkOrgEmail,
+  unlinkOrgForUser,
+} from "../town/org-feed.ts";
 import { markPicnic } from "../town/picnic.ts";
 import { type PokerSettle, pokerRelease, pokerSettle, pokerSit } from "../town/poker.ts";
 import { freezeDays, questBoard, questEvent } from "../town/quests.ts";
@@ -1623,6 +1634,52 @@ export const town = actor({
     ticket: async (c, userId: number, t: Ticket): Promise<number | null> => {
       requireInternal(c.conn.state);
       return c.vars.serial(() => giveTicket(c.db, userId, t));
+    },
+
+    /**
+     * A one-time code the player's organization redeems with their email. The notice is the opt-in:
+     * cloud token counts then show on this character, and the world is public.
+     */
+    startOrgClaim: async (c, rawOrgId: unknown) => {
+      const userId = requireUser(c.conn.state);
+      const orgId = parseOrgId(rawOrgId);
+      if (!orgId) throw new UserError("Use the organization's id, like swerv.", { code: "invalid_org" });
+      if (!parseOrgFeedSecrets(process.env.ORG_FEED_SECRETS).some((f) => f.orgId === orgId))
+        throw new UserError("That organization has no usage feed.", { code: "not_found" });
+      const now = Date.now();
+      if (!orgClaimLimiter.take(String(userId), now))
+        throw new UserError("That's a lot of codes. Try again in an hour.", { code: "rate_limited" });
+      return c.vars.serial(() => startOrgClaim(c.db, userId, orgId, now));
+    },
+
+    /** Links and whether a code is still waiting. The code itself is only returned when it's made. */
+    orgFeed: (c) => {
+      const userId = requireUser(c.conn.state);
+      return orgFeedStatus(c.db, userId, Date.now());
+    },
+
+    /** Drop every email this player linked to `rawOrgId`, and any code still waiting for it. */
+    unlinkOrgFeed: async (c, rawOrgId: unknown): Promise<void> => {
+      const userId = requireUser(c.conn.state);
+      const orgId = parseOrgId(rawOrgId);
+      if (!orgId) throw new UserError("Use the organization's id, like swerv.", { code: "invalid_org" });
+      await c.vars.serial(() => unlinkOrgForUser(c.db, userId, orgId));
+    },
+
+    /** The feed's HTTP handler, after the bearer token picked the organization. */
+    bindOrgFeed: (c, raw: { orgId: string; code: string; email: string }) => {
+      requireInternal(c.conn.state);
+      return c.vars.serial(() => bindOrgFeed(c.db, raw.orgId, raw.code, raw.email, Date.now()));
+    },
+
+    orgFeedPlayer: (c, orgId: string, email: string): Promise<number | null> => {
+      requireInternal(c.conn.state);
+      return playerForFeedEmail(c.db, orgId, email);
+    },
+
+    unlinkOrgEmail: (c, orgId: string, email: string): Promise<boolean> => {
+      requireInternal(c.conn.state);
+      return c.vars.serial(() => unlinkOrgEmail(c.db, orgId, email));
     },
 
     /** For `world` starting up: everyone, every company, every office and everything on a floor. */

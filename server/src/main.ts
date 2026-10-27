@@ -48,7 +48,7 @@ if (existsSync(SITE))
 
 const { ENGINE_PORT, ENGINE_TOKEN, registry } = await import("./actors/registry.ts");
 const { createClient } = await import("rivetkit/client");
-const { pricing, main } = await import("./actors/shared.ts");
+const { pricing, main, internal } = await import("./actors/shared.ts");
 const { boardsChanged } = await import("./town/boards.ts");
 
 const refreshPricing = async () => {
@@ -73,6 +73,18 @@ const localClient = createClient<typeof registry>({
   disableMetadataLookup: true,
 });
 const health = healthCheck(() => main(localClient).town.health(), config.version);
+const { parseOrgFeedSecrets } = await import("./org-feed-secrets.ts");
+const { handleOrgLink, handleOrgUnlink, handleOrgUsage } = await import("./org-feed-http.ts");
+const orgFeeds = parseOrgFeedSecrets(process.env.ORG_FEED_SECRETS);
+const orgDeps = {
+  secrets: () => orgFeeds,
+  playerForEmail: (orgId: string, email: string) => main(localClient).town.orgFeedPlayer(orgId, email),
+  bind: (orgId: string, code: string, email: string) =>
+    main(localClient).town.bindOrgFeed({ orgId, code, email }),
+  unlink: (orgId: string, email: string) => main(localClient).town.unlinkOrgEmail(orgId, email),
+  ingest: (userId: number, events: import("@tokenmaxxing/core/types.ts").TokenEvent[]) =>
+    localClient.player.get([String(userId)], internal).ingestOrg(events),
+};
 
 // The landing page says how many have signed up: counted once a minute, and written into the page's
 // `<!--players-->` as it goes out. Until there's a count (or without a server, in `astro dev`) the
@@ -164,6 +176,9 @@ const server = Bun.serve({
     // Useless without ADMIN_TOKEN: every action it calls checks it (`town`'s admin actions).
     "/admin": html(assets.get("/admin.html"), "admin"),
     "/health": health,
+    "/api/v1/org-usage": (req: Request) => handleOrgUsage(req, orgDeps),
+    "/api/v1/org-usage/link": (req: Request) => handleOrgLink(req, orgDeps),
+    "/api/v1/org-usage/unlink": (req: Request) => handleOrgUnlink(req, orgDeps),
     "/install.sh": installScript,
     // Company logos, copied from their websites. Sandboxed: an SVG is someone else's markup.
     "/logos/:file": async (req) => {

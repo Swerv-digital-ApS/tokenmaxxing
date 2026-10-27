@@ -14,6 +14,10 @@ export const SOURCES = [
   "cursor_local",
   "grok_bot",
   "github",
+  // Claude that never wrote a local jsonl: claude.ai, Claude Code on the web, other cloud sessions.
+  "claude_cloud",
+  // OpenAI usage that never wrote a local rollout: ChatGPT, Codex on the web.
+  "codex_cloud",
 ] as const;
 export type Source = (typeof SOURCES)[number];
 

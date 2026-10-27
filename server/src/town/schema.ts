@@ -7,6 +7,7 @@ import { migrateGrid } from "./grid.ts";
 import { migrateKeynotes } from "./keynotes.ts";
 import { migrateMerchant } from "./merchant.ts";
 import { migrateOffices } from "./offices.ts";
+import { migrateOrgFeed } from "./org-feed.ts";
 import { migratePoker } from "./poker.ts";
 import { migrateQuests } from "./quests.ts";
 import { migrateRequests } from "./requests.ts";
@@ -148,6 +149,7 @@ export async function migrate(sql: Sql): Promise<void> {
     week TEXT NOT NULL, rung INTEGER NOT NULL, user_id INTEGER NOT NULL, item TEXT NOT NULL,
     odds REAL NOT NULL, at INTEGER NOT NULL,
     PRIMARY KEY (week, rung, user_id, item)) WITHOUT ROWID`);
+  await migrateOrgFeed(sql);
 }
 
 /**

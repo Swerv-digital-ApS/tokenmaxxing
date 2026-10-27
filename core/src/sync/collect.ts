@@ -28,7 +28,11 @@ export interface CollectOptions extends Omit<ExtractOptions, "enabled"> {
 const extracted = (enabled: ReadonlySet<Source>): Set<Extracted> =>
   new Set(
     [...enabled].flatMap((s): Extracted[] =>
-      s === "cursor_local" ? ["cursor_api", "grok_bot"] : s === "github" ? [] : [s],
+      s === "cursor_local"
+        ? ["cursor_api", "grok_bot"]
+        : s === "github" || s === "claude_cloud" || s === "codex_cloud"
+          ? []
+          : [s],
     ),
   );
 

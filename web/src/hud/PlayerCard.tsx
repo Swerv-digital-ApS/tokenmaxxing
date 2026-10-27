@@ -24,6 +24,7 @@ import { hud } from "../store.ts";
 import { Computers } from "./Computers.tsx";
 import { dayText, ranges } from "./format.ts";
 import { daysAgoText, sourceName } from "./heat.ts";
+import { OrgFeed } from "./OrgFeed.tsx";
 import { Shelf, ShelfPicker } from "./Showcase.tsx";
 import { Tickets } from "./Tickets.tsx";
 import { AvatarImage, Modal, Pills, useLoad, useRun } from "./ui.tsx";
@@ -241,6 +242,7 @@ export function PlayerCard({ userId }: { userId: number }) {
           )}
           <HowYouWork p={p} />
           {mine && <Computers />}
+          {mine && <OrgFeed />}
         </>
       )}
     </Modal>

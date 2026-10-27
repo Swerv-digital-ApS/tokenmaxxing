@@ -1,4 +1,5 @@
 import { weekOf } from "@tokenmaxxing/core/raid.ts";
+import { parseOrgFeedSecrets } from "./org-feed-secrets.ts";
 
 interface Config {
   port: number;
@@ -30,6 +31,8 @@ export function loadConfig(env: Record<string, string | undefined>, version: str
   const boost = env.RAID_LOOT_BOOST;
   if (boost !== undefined && boost !== "" && !(Number(boost) >= 1 && Number(boost) <= 1000))
     throw new Error(`invalid RAID_LOOT_BOOST: ${boost} (1 to 1000)`);
+  // Hashes only. A bad value fails boot. Unset means the feed answers 401.
+  parseOrgFeedSecrets(env.ORG_FEED_SECRETS);
   return Object.freeze({
     port,
     host: env.TOKENMAXXING_HOST ?? "0.0.0.0",
