@@ -63,6 +63,8 @@ content never does. The app reads local logs and Cursor dashboard usage:
 | Cursor | Dashboard usage API; signs in using `cursorAuth/accessToken` from the local `state.vscdb` |
 | Grok Bot | The same Cursor dashboard, for models `grok-bot` and `grok-bot-*`. The Grok Bot app's weekly plan percent is not a token count and is not read, so Grok Bot stays at 0 until those dashboard rows exist |
 | GitHub | PRs you opened, on every account the `gh` CLI is signed in to (github.com and Enterprise), or else with the github.com login git saved for HTTPS (at most every 15 minutes); only a hash of each PR's URL and when it was opened are sent. The menu says when neither is there |
+| Claude Cloud | An organization feed, only after you opt in on your character: claude.ai, Claude Code on the web, and other Claude sessions that never wrote a local jsonl. The menu says "Claude Cloud" |
+| Codex Cloud | The same feed: ChatGPT and Codex sessions that never wrote a local rollout. The menu says "Codex Cloud" |
 
 Cursor must be installed and signed in. Its session credential is read locally and sent only to
 `cursor.com`; it is never uploaded to Tokenmaxxing or saved in sync state. Every 15 minutes, the helper
@@ -75,6 +77,14 @@ next sync without advancing the checkpoint or falling back to text estimates. Ex
 replaced on world days with dashboard events; earlier days remain as previously synced.
 Grok Bot models on that dashboard are stored as Grok Bot, not Cursor. An older checkpoint re-reads
 history once so rows that used to be skipped are included.
+
+Cloud sessions that never write a local log (claude.ai, Claude Code on the web, ChatGPT) are not on
+the machine, so the app cannot see them. An organization that already has those rows in its team
+accounts can push them with the [organization usage feed](docs/org-usage-feed.md). You opt in on
+your character first. The card says the world is public. Only token counts, model names, timestamps
+and opaque ids are accepted, and only for an email you linked. Cursor and Grok Bot stay on the
+dashboard sync above; the feed does not count them. A cloud row with the same model and token
+counts as a local row within two minutes is kept once, and the local row wins.
 
 Every source that's installed is read. **Everything is public in the world:** anyone can see your
 totals, cost, parallelism, models and daily activity, and the leaderboard ranks everyone. So are your bio and the badges you pin

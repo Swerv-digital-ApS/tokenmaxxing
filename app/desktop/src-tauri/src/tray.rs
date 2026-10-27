@@ -248,6 +248,9 @@ fn source_lines(state: &State) -> Vec<String> {
                 "cursor_local" => "Cursor",
                 // Cursor dashboard rows for grok-bot* cloud agents.
                 "grok_bot" => "Grok Bot",
+                // Organization feed: Claude and Codex that never wrote a local log.
+                "claude_cloud" => "Claude Cloud",
+                "codex_cloud" => "Codex Cloud",
                 other => other,
             };
             format!("   {name} · {}", compact(s.tokens))

@@ -169,6 +169,11 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
   64-bit limit, where it would throw and take the leaderboards down.
 - Per player: 60 ingests a minute and 500,000 new events a world day. Past either, the app's sync fails and
   picks up where it stopped on its next run, so a big first sync is delayed, never lost.
+- `claude_cloud` and `codex_cloud` are not accepted from a device. They arrive only from the organization
+  feed (`docs/org-usage-feed.md`): an opted-in player, bearer token in `ORG_FEED_SECRETS`, idempotent
+  `org:<orgId>:<id>` message ids, at most 32 players a request. A cloud row with the same model and token counts as a local
+  `claude_code` / `claude_cowork` / `codex` row within two minutes is dropped, and a later local row
+  deletes the cloud row. The day cap still applies; the device's per-minute ingest limit does not.
 
 **`town["main"]`**: everything cold, joined in SQL.
 - Tables: `users`, `companies` (ids never reused), `usage_daily`, `activity_daily`, `capped_daily`,
@@ -176,7 +181,8 @@ to `town.report`, then tells `world` how many agents are live, and `arcade.usage
   handed out), `loot` (raid drops handed out), `ledger` (coins held and paid by games, and traded), `trades` (one open offer per sender),
   `offices`, `company_ledger` (company wallets), `match_players` (one row per player per finished game),
   `quest_days`, `quest_counts`, `green_hours`, `badge_awards`, `bio_reports`, `showcase`, `tavern_daily`, `keynotes`,
-  `deleted_users`, `lost_signups` (ids of sign-ups whose `player` failed to start), `admin_log`.
+  `deleted_users`, `lost_signups` (ids of sign-ups whose `player` failed to start), `admin_log`,
+  `org_feed_links` (org id + email → player; the opt-in), `org_claims` (hash of a one-time link code).
 - Accounts: `signUp` (20 an hour per IP, 1,000 an hour in all), `rename` (10 an hour), `setLook` (refuses items you don't hold), `me`.
 - Companies: create (on a plot the owner picks: any empty block next to the town, see `frontier` in
   `core/src/maps.ts`), leave, kick, rename, `setWebsite`. One company per person, at most 50 members. The

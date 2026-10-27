@@ -18,6 +18,9 @@ export { eventually } from "./eventually.ts";
 /** The admin page's token on the test server. */
 export const ADMIN_TOKEN = "test-admin-token-0123456789abcdef";
 
+/** Bearer token for the `swerv` organization feed on the test server. */
+export const ORG_FEED_TOKEN = "test-org-feed-secret-0123456789abcd";
+
 const canListen = (port: number) => {
   try {
     Bun.listen({ hostname: "127.0.0.1", port, socket: { data() {} } }).stop(true);
@@ -114,6 +117,7 @@ async function start(attempts = 5): Promise<string> {
         // Green hours pay coins: the live grid would move balances the tests count.
         GRID_FEED: "off",
         ADMIN_TOKEN,
+        ORG_FEED_SECRETS: `swerv:${ORG_FEED_TOKEN}`,
         // Most tests buy from wherever they stand; the shop rule is tested with `strictShops`.
         SHOPS_ANYWHERE: "1",
         // Every test comes from 127.0.0.1; `signUp` below poses as a new address each time instead.

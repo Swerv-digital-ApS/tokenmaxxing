@@ -7,7 +7,8 @@ import { stopEngine } from "./engine.ts";
 import { type Page, pageHeaders } from "./headers.ts";
 import { healthCheck } from "./health.ts";
 import { installScript } from "./install.ts";
-import { rivetProxy } from "./proxy.ts";
+import { clientIp, rivetProxy } from "./proxy.ts";
+import { RateLimiter } from "./rate-limit.ts";
 import { diagnose, failureWindow, type ProbeResult, watchdogConfig } from "./watchdog.ts";
 
 // Once startup is done, Bun exits on any unhandled rejection: one missed `.catch` would take the
@@ -48,7 +49,7 @@ if (existsSync(SITE))
 
 const { ENGINE_PORT, ENGINE_TOKEN, registry } = await import("./actors/registry.ts");
 const { createClient } = await import("rivetkit/client");
-const { pricing, main } = await import("./actors/shared.ts");
+const { pricing, main, internal } = await import("./actors/shared.ts");
 const { boardsChanged } = await import("./town/boards.ts");
 
 const refreshPricing = async () => {
@@ -73,6 +74,26 @@ const localClient = createClient<typeof registry>({
   disableMetadataLookup: true,
 });
 const health = healthCheck(() => main(localClient).town.health(), config.version);
+const { parseOrgFeedSecrets } = await import("./org-feed-secrets.ts");
+const { handleOrgLink, handleOrgUnlink, handleOrgUsage, orgIpGuard } = await import("./org-feed-http.ts");
+const orgFeeds = parseOrgFeedSecrets(process.env.ORG_FEED_SECRETS);
+const orgDeps = {
+  secrets: () => orgFeeds,
+  playerForEmail: (orgId: string, email: string) => main(localClient).town.orgFeedPlayer(orgId, email),
+  bind: (orgId: string, code: string, email: string) =>
+    main(localClient).town.bindOrgFeed({ orgId, code, email }),
+  unlink: (orgId: string, email: string) => main(localClient).town.unlinkOrgEmail(orgId, email),
+  ingest: (userId: number, events: import("@tokenmaxxing/core/types.ts").TokenEvent[]) =>
+    localClient.player.get([String(userId)], internal).ingestOrg(events),
+};
+// Includes failed auth. The per-org limit applies only after the secret matches.
+const orgIps = new RateLimiter(300, 60_000);
+const orgRoute =
+  (handle: (req: Request) => Promise<Response>) => (req: Request, server: Parameters<typeof clientIp>[1]) => {
+    const blocked = orgIpGuard(clientIp(req, server, config.gateway.ipHeader), orgIps);
+    if (blocked) return blocked;
+    return handle(req);
+  };
 
 // The landing page says how many have signed up: counted once a minute, and written into the page's
 // `<!--players-->` as it goes out. Until there's a count (or without a server, in `astro dev`) the
@@ -164,6 +185,9 @@ const server = Bun.serve({
     // Useless without ADMIN_TOKEN: every action it calls checks it (`town`'s admin actions).
     "/admin": html(assets.get("/admin.html"), "admin"),
     "/health": health,
+    "/api/v1/org-usage": orgRoute((req) => handleOrgUsage(req, orgDeps)),
+    "/api/v1/org-usage/link": orgRoute((req) => handleOrgLink(req, orgDeps)),
+    "/api/v1/org-usage/unlink": orgRoute((req) => handleOrgUnlink(req, orgDeps)),
     "/install.sh": installScript,
     // Company logos, copied from their websites. Sandboxed: an SVG is someone else's markup.
     "/logos/:file": async (req) => {

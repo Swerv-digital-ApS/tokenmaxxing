@@ -16,6 +16,8 @@ const SOURCE_NAMES: Record<string, string> = {
   cursor_local: "Cursor",
   grok_bot: "Grok Bot",
   github: "GitHub",
+  claude_cloud: "Claude Cloud",
+  codex_cloud: "Codex Cloud",
 };
 
 export const sourceName = (source: string): string => SOURCE_NAMES[source] ?? source;

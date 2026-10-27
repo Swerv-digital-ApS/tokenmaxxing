@@ -2,6 +2,7 @@ import { BURN_WINDOW_MS } from "@tokenmaxxing/core/cop.ts";
 import { MINUTE_CAP } from "@tokenmaxxing/core/games/tokenmaxxing.ts";
 import type { Usage } from "@tokenmaxxing/core/games/types.ts";
 import { HOUR_MS } from "@tokenmaxxing/core/grid.ts";
+import { isOrgFeedSource } from "@tokenmaxxing/core/org-feed.ts";
 import { formatPhoneCode, parsePhoneCode, phoneSecret } from "@tokenmaxxing/core/pairing.ts";
 import type { TodayBySource } from "@tokenmaxxing/core/protocol.ts";
 import { dayKey, worldClock } from "@tokenmaxxing/core/range.ts";
@@ -13,6 +14,7 @@ import type { Client } from "rivetkit/client";
 import { db } from "rivetkit/db";
 import { sha256 } from "../crypto.ts";
 import { reconcileCursorUsage } from "../cursor-usage.ts";
+import { reconcileOrgUsage } from "../org-usage.ts";
 import { RateLimiter } from "../rate-limit.ts";
 import { AGENT_BUCKET_MS } from "../stats.ts";
 import {
@@ -36,6 +38,7 @@ import {
   type Sql,
   serial,
   splitToken,
+  type TxSql,
   unauthorized,
   type Via,
   waitForTick,
@@ -184,6 +187,87 @@ function deviceName(raw: unknown): string {
 
 const platformOf = (raw: unknown): string =>
   typeof raw === "string" && /^[a-z0-9]{1,16}$/.test(raw) ? raw : "unknown";
+
+/**
+ * Insert `valid` and tell the town which days changed. A cloud row that matches a local turn is not
+ * inserted (`overlaps`); a local row deletes the cloud row it replaces, and that day is reported too.
+ */
+async function commitUsage(
+  db: TxSql,
+  state: PlayerState,
+  client: Client<typeof registry>,
+  valid: TokenEvent[],
+  now: number,
+): Promise<{ inserted: number; overlaps: number }> {
+  const today = dayKey(now);
+  const stored = state.stored?.day === today ? state.stored.events : 0;
+  if (stored >= EVENTS_PER_DAY)
+    throw new UserError("That's a lot of events for one day. The rest syncs tomorrow.", {
+      code: "rate_limited",
+    });
+  const days = new Set(valid.map((e) => dayKey(e.timestamp)));
+  let overlaps = 0;
+  const inserted = await db.transaction(
+    async (tx) => {
+      let n = 0;
+      const cursor = await reconcileCursorUsage(tx, valid);
+      const org = await reconcileOrgUsage(tx, cursor.events);
+      overlaps = org.overlaps;
+      for (const day of org.deletedDays) days.add(day);
+      const reconciled = org.events;
+      const deletedAt = [...cursor.deletedAt, ...org.deletedAt];
+      for (const chunk of chunkArray(reconciled, INSERT_CHUNK)) {
+        const row = `(${COLUMNS.map(() => "?").join(",")})`;
+        const rows = await tx.execute(
+          `INSERT OR IGNORE INTO events (${COLUMNS.join(",")}) VALUES ${chunk.map(() => row).join(",")} RETURNING id`,
+          ...chunk.flatMap(eventRow),
+        );
+        n += rows.length;
+        // Replay old Cursor IDs to enrich their cost without inserting tokens again.
+        // A missing cost from an older client must not erase an already reported value.
+        const costs = chunk.filter(
+          (e) => (e.source === "cursor_local" || e.source === "grok_bot") && e.costCents != null,
+        );
+        if (costs.length)
+          await tx.execute(
+            `INSERT INTO events (${COLUMNS.join(",")}) VALUES ${costs.map(() => row).join(",")}
+                 ON CONFLICT DO UPDATE SET cost_cents = excluded.cost_cents
+                 WHERE events.cost_cents IS NOT excluded.cost_cents`,
+            ...costs.flatMap(eventRow),
+          );
+        // Claude logs a response once per content block and only the last line has its final
+        // usage, so one split across two syncs arrives twice: keep the larger numbers.
+        const claude = chunk.filter(
+          (e) =>
+            (e.source === "claude_code" || e.source === "claude_cowork") && e.messageType === "assistant",
+        );
+        if (claude.length)
+          await tx.execute(
+            `INSERT INTO events (${COLUMNS.join(",")}) VALUES ${claude.map(() => row).join(",")}
+                 ON CONFLICT DO UPDATE SET
+                   input_tokens = MAX(events.input_tokens, excluded.input_tokens),
+                   output_tokens = MAX(events.output_tokens, excluded.output_tokens),
+                   cache_creation_tokens = MAX(events.cache_creation_tokens, excluded.cache_creation_tokens),
+                   cache_read_tokens = MAX(events.cache_read_tokens, excluded.cache_read_tokens)
+                 WHERE excluded.input_tokens > events.input_tokens
+                    OR excluded.output_tokens > events.output_tokens
+                    OR excluded.cache_creation_tokens > events.cache_creation_tokens
+                    OR excluded.cache_read_tokens > events.cache_read_tokens`,
+            ...claude.flatMap(eventRow),
+          );
+      }
+      // Also queue duplicate-only retries: the previous request may have saved events but
+      // failed to report them. Keeping this with the inserts survives crashes and partial sends.
+      for (const day of days) await tx.execute("INSERT OR IGNORE INTO pending_usage_days VALUES (?)", day);
+      await trophyHoursChanged(tx, [...valid.map((e) => e.timestamp), ...deletedAt]);
+      return n;
+    },
+    { name: "ingest-events" },
+  );
+  state.stored = { day: today, events: stored + inserted };
+  if (days.size) await reportUsageDays(db, [...days], (d) => report(db, client, state.userId, d, now));
+  return { inserted, overlaps };
+}
 
 export const player = actor({
   // Building the new partial index can take longer for players with a large backfill.
@@ -439,76 +523,12 @@ export const player = actor({
       const valid: TokenEvent[] = [];
       for (const raw of events) {
         const e = parseEvent(raw, now);
-        if (typeof e !== "string") valid.push(e);
+        // Cloud rows arrive only through the organization feed. A device that sends them is skipped.
+        if (typeof e === "string" || isOrgFeedSource(e.source)) continue;
+        valid.push(e);
       }
       const ingested = c.vars.serial(async () => {
-        const today = dayKey(now);
-        const stored = c.state.stored?.day === today ? c.state.stored.events : 0;
-        if (stored >= EVENTS_PER_DAY)
-          throw new UserError("That's a lot of events for one day. The rest syncs tomorrow.", {
-            code: "rate_limited",
-          });
-        const days = [...new Set(valid.map((e) => dayKey(e.timestamp)))];
-        const inserted = await c.db.transaction(
-          async (tx) => {
-            let inserted = 0;
-            const { events: reconciled, deletedAt } = await reconcileCursorUsage(tx, valid);
-            for (const chunk of chunkArray(reconciled, INSERT_CHUNK)) {
-              const row = `(${COLUMNS.map(() => "?").join(",")})`;
-              const rows = await tx.execute(
-                `INSERT OR IGNORE INTO events (${COLUMNS.join(",")}) VALUES ${chunk.map(() => row).join(",")} RETURNING id`,
-                ...chunk.flatMap(eventRow),
-              );
-              inserted += rows.length;
-              // Replay old Cursor IDs to enrich their cost without inserting tokens again.
-              // A missing cost from an older client must not erase an already reported value.
-              const costs = chunk.filter(
-                (e) => (e.source === "cursor_local" || e.source === "grok_bot") && e.costCents != null,
-              );
-              if (costs.length)
-                await tx.execute(
-                  `INSERT INTO events (${COLUMNS.join(",")}) VALUES ${costs.map(() => row).join(",")}
-                 ON CONFLICT DO UPDATE SET cost_cents = excluded.cost_cents
-                 WHERE events.cost_cents IS NOT excluded.cost_cents`,
-                  ...costs.flatMap(eventRow),
-                );
-              // Claude logs a response once per content block and only the last line has its final
-              // usage, so one split across two syncs arrives twice: keep the larger numbers.
-              const claude = chunk.filter(
-                (e) =>
-                  (e.source === "claude_code" || e.source === "claude_cowork") &&
-                  e.messageType === "assistant",
-              );
-              if (claude.length)
-                await tx.execute(
-                  `INSERT INTO events (${COLUMNS.join(",")}) VALUES ${claude.map(() => row).join(",")}
-                 ON CONFLICT DO UPDATE SET
-                   input_tokens = MAX(events.input_tokens, excluded.input_tokens),
-                   output_tokens = MAX(events.output_tokens, excluded.output_tokens),
-                   cache_creation_tokens = MAX(events.cache_creation_tokens, excluded.cache_creation_tokens),
-                   cache_read_tokens = MAX(events.cache_read_tokens, excluded.cache_read_tokens)
-                 WHERE excluded.input_tokens > events.input_tokens
-                    OR excluded.output_tokens > events.output_tokens
-                    OR excluded.cache_creation_tokens > events.cache_creation_tokens
-                    OR excluded.cache_read_tokens > events.cache_read_tokens`,
-                  ...claude.flatMap(eventRow),
-                );
-            }
-            // Also queue duplicate-only retries: the previous request may have saved events but
-            // failed to report them. Keeping this with the inserts survives crashes and partial sends.
-            for (const day of days)
-              await tx.execute("INSERT OR IGNORE INTO pending_usage_days VALUES (?)", day);
-            await trophyHoursChanged(tx, [...valid.map((e) => e.timestamp), ...deletedAt]);
-            return inserted;
-          },
-          { name: "ingest-events" },
-        );
-        c.state.stored = { day: today, events: stored + inserted };
-        // Only this request's days. Older pending ones drain after it, a batch per turn of the lock.
-        if (days.length)
-          await reportUsageDays(c.db, days, (d) =>
-            report(c.db, c.client<typeof registry>(), c.state.userId, d, now),
-          );
+        const { inserted } = await commitUsage(c.db, c.state, c.client<typeof registry>(), valid, now);
         return { inserted, duplicates: valid.length - inserted, skipped: events.length - valid.length };
       });
       return ingested.then((result) => {
@@ -523,6 +543,54 @@ export const player = actor({
           const userId = c.state.userId;
           // The raw events and totals are already acknowledged. A slow match must not keep the
           // ingest lock or delay this response, and backfills must not queue a call for every batch.
+          c.waitUntil(
+            c.vars
+              .battleUpdate(async () => {
+                if (!signal.aborted) await arcade.usage(userId);
+              })
+              .catch(() => {}),
+          );
+        }
+        return result;
+      });
+    },
+
+    /**
+     * Organization feed only: `claude_cloud` and `codex_cloud`, already validated. The device limiter
+     * does not apply; the day cap does. Called with the internal key from the HTTP handler.
+     */
+    ingestOrg: (c, events: unknown): Promise<{ inserted: number; duplicates: number; overlaps: number }> => {
+      requireInternal(c.conn.state);
+      if (!Array.isArray(events) || events.length > MAX_EVENTS_PER_REQUEST)
+        throw new UserError("Too many events.", { code: "invalid_body" });
+      const now = Date.now();
+      const valid: TokenEvent[] = [];
+      for (const raw of events) {
+        const e = parseEvent(raw, now);
+        if (typeof e === "string" || !isOrgFeedSource(e.source))
+          throw new UserError("Invalid event.", { code: "invalid_event" });
+        valid.push(e);
+      }
+      const ingested = c.vars.serial(async () => {
+        const { inserted, overlaps } = await commitUsage(
+          c.db,
+          c.state,
+          c.client<typeof registry>(),
+          valid,
+          now,
+        );
+        return { inserted, duplicates: valid.length - overlaps - inserted, overlaps };
+      });
+      return ingested.then((result) => {
+        if (valid.length > 0) {
+          const signal = c.abortSignal;
+          c.waitUntil(
+            drainUsageReports(c.db, c.vars.serial, signal, (days) =>
+              report(c.db, c.client<typeof registry>(), c.state.userId, days, Date.now()),
+            ).catch(() => {}),
+          );
+          const arcade = main(c.client()).arcade;
+          const userId = c.state.userId;
           c.waitUntil(
             c.vars
               .battleUpdate(async () => {
@@ -565,6 +633,8 @@ export async function migrateEvents(d: Sql): Promise<void> {
     ON events (source, message_id, COALESCE(request_id, ''), message_type)`);
   await d.execute("CREATE INDEX IF NOT EXISTS events_day ON events (day, message_type)");
   await d.execute("CREATE INDEX IF NOT EXISTS events_time ON events (timestamp)");
+  // Cloud overlap looks up one source across a two-minute window.
+  await d.execute("CREATE INDEX IF NOT EXISTS events_source_time ON events (source, timestamp)");
   // Recent activity and MAX(timestamp) must not read a player's entire history.
   await d.execute(`CREATE INDEX IF NOT EXISTS events_assistant_time
     ON events (timestamp, session_id, agent_id) WHERE message_type = 'assistant'`);
