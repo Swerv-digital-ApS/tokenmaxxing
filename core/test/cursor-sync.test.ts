@@ -28,8 +28,13 @@ const page = (rows: unknown[], total = rows.length) =>
     usageEventsDisplay: rows,
     totalUsageEventsCount: total,
   });
+/** Personal-plan fixtures: the team list is empty, so only the personal usage call is recorded. */
 const fetcher = (fn: (input: string | URL | Request, init?: RequestInit) => Promise<Response>) =>
-  fn as typeof fetch;
+  (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (url.includes("/api/dashboard/teams")) return Response.json({ teams: [] });
+    return fn(input, init);
+  }) as typeof fetch;
 
 describe("Cursor sync checkpoint", () => {
   const enabled = new Set<Source>(["cursor_local"]);

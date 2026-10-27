@@ -23,7 +23,8 @@ export type Source = (typeof SOURCES)[number];
  *
  * The Grok Bot macOS app's `weekly-usage.cache` is plan percent only
  * (`percentUsed`, reset time, plan label). It is not a token ledger and is never
- * read. Grok Bot stays at 0 until the Cursor dashboard returns these rows.
+ * read. Rows come from the Cursor dashboard, including usage billed to a team the
+ * signed-in user belongs to. Grok Bot stays at 0 until those rows exist.
  */
 export function isGrokBotModel(model: string): boolean {
   return model === "grok-bot" || model.startsWith("grok-bot-");
