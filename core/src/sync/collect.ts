@@ -5,6 +5,7 @@ import {
 } from "llm-usage-extraction";
 import { fetchPullRequests, type GithubAccount, localGithubAccounts } from "../sources/github.ts";
 import type { GithubProblem, Source, SyncState, TokenEvent } from "../types.ts";
+import { collectCursorDashboard } from "./cursor-dashboard.ts";
 
 const GITHUB_EVERY_MS = 15 * 60_000;
 
@@ -22,13 +23,14 @@ export interface CollectOptions extends Omit<ExtractOptions, "enabled"> {
 }
 
 /**
- * What llm-usage-extraction reads for our sources. Our `cursor_local` is Cursor's dashboard (its
- * `cursor_api`, with Grok Bot), never its local Cursor parsers, which would count the same usage twice.
+ * What llm-usage-extraction reads for our sources. Cursor's dashboard (personal and team) is read in
+ * `cursor-dashboard.ts`, not by the package: its request body has no team id, and enabling its
+ * `cursor_local` parser would count the same usage twice.
  */
 const extracted = (enabled: ReadonlySet<Source>): Set<Extracted> =>
   new Set(
     [...enabled].flatMap((s): Extracted[] =>
-      s === "cursor_local" ? ["cursor_api", "grok_bot"] : s === "github" ? [] : [s],
+      s === "cursor_local" || s === "grok_bot" ? [] : s === "github" ? [] : [s],
     ),
   );
 
@@ -49,6 +51,17 @@ export async function* collect(state: SyncState, opts: CollectOptions): AsyncGen
       commit: batch.commit,
     };
   }
+
+  // After the logs, before GitHub: a team failure must not skip the dashboard checkpoint rules,
+  // and the GitHub block returns early when it has nothing to do.
+  yield* collectCursorDashboard(state, {
+    enabled,
+    now: opts.now,
+    onError: opts.onError,
+    cursorDbPath: opts.cursorDbPath,
+    cursorCredentials: opts.cursorCredentials,
+    cursorFetch: opts.cursorFetch,
+  });
 
   // PRs change a few times a day, and search has a tight rate limit: ask at most every 15 minutes.
   const now = (opts.now ?? Date.now)();

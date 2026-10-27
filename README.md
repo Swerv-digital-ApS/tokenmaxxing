@@ -61,7 +61,7 @@ content never does. The app reads local logs and Cursor dashboard usage:
 | Claude Cowork | `~/Library/Application Support/Claude/…/.claude/projects/**/*.jsonl` |
 | Codex | `~/.codex/sessions/**/*.jsonl` and `~/.codex/archived_sessions/**/*.jsonl`, and PostHog Desktop's gateway runs in `~/Library/Application Support/@posthog/posthog-code/codex-home/*/sessions/**/*.jsonl`. A rollout named in `state_*.sqlite` (`threads.rollout_path`) is included when that file still exists under the Codex home. `threads.tokens_used` is one running total with no per-turn split, so it is not counted. Consumer ChatGPT chats that never write a Codex rollout have no local token ledger |
 | Cursor | Dashboard usage API; signs in using `cursorAuth/accessToken` from the local `state.vscdb` |
-| Grok Bot | The same Cursor dashboard, for models `grok-bot` and `grok-bot-*`. The Grok Bot app's weekly plan percent is not a token count and is not read, so Grok Bot stays at 0 until those dashboard rows exist |
+| Grok Bot | The same Cursor dashboard, for models `grok-bot` and `grok-bot-*`, including usage billed to a Cursor team the signed-in user belongs to. The Grok Bot app's weekly plan percent is not a token count and is not read, so Grok Bot stays at 0 until those dashboard rows exist |
 | GitHub | PRs you opened, on every account the `gh` CLI is signed in to (github.com and Enterprise), or else with the github.com login git saved for HTTPS (at most every 15 minutes); only a hash of each PR's URL and when it was opened are sent. The menu says when neither is there |
 
 Cursor must be installed and signed in. Its session credential is read locally and sent only to
@@ -69,7 +69,12 @@ Cursor must be installed and signed in. Its session credential is read locally a
 fetches paginated input, output, cache-write and cache-read counts from the dashboard, using the
 [authentication approach from cursorbar](https://github.com/c-johannesen/cursorbar). The first sync requests
 all history available from Cursor, sending pages of up to 1000 events as they arrive; later syncs
-re-read seven days to catch delayed usage. No public
+re-read seven days to catch delayed usage. A personal call (no team id) misses usage a team plan
+bills to the team. That is where Grok Bot rows show on cursor.com/dashboard for those accounts. The
+helper also lists teams (`POST /api/dashboard/teams`), reads the signed-in user's id
+(`POST /api/dashboard/team`), and requests `get-filtered-usage-events` with that `teamId` and
+`userId`. A row is kept only when `owningUser` is that user, so teammates' usage is never counted.
+Rows the personal call already returned share its message id and count once. No public
 Cursor profile is required. Requests without a token breakdown are skipped. API failures retry on the
 next sync without advancing the checkpoint or falling back to text estimates. Existing estimates are
 replaced on world days with dashboard events; earlier days remain as previously synced.
