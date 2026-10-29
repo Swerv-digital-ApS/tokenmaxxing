@@ -8,7 +8,7 @@ const features = [
   {
     emoji: "🏘️",
     title: "A town you walk around in",
-    text: "You're a pixel character in a shared town. Walk the square, chat with whoever is in the same room, fire off emoji, and open anyone's card to see their numbers.",
+    text: "You're a character in a shared 3D town. Walk the streets, turn the camera any way you like, chat with whoever is in the same room, fire off emoji, and open anyone's card to see their numbers.",
     shot: "/shots/square.webp",
   },
   {
@@ -22,6 +22,18 @@ const features = [
     title: "Companies that build the town",
     text: "Start a company, or ask to join one. You pick where it builds and the town grows that way. Your house is painted in your brand's colours with your logo on it, and it grows from a cellar hatch to a mansion as your people push more tokens.",
     shot: "/shots/company.webp",
+  },
+  {
+    emoji: "🍺",
+    title: "The Tavern",
+    text: "A bar with a barkeep and a free daily special, a quest board with three daily quests and a weekly one, a poker table, a Hall of Fame, and stairs down to a basement net cafe full of arcade cabinets.",
+    shot: "/shots/tavern.webp",
+  },
+  {
+    emoji: "🛋️",
+    title: "Shops you walk into",
+    text: "The furniture shop, the clothes shop, the barber and the pet shop are real places on the street. Try a sofa before you buy it, then put it in your office and move it around until it fits.",
+    shot: "/shots/shops.webp",
   },
   {
     emoji: "🏆",
@@ -61,7 +73,7 @@ const more = [
   },
 ];
 
-const sources = ["Claude Code", "Claude Cowork", "Codex", "Cursor", "GitHub"];
+const sources = ["Claude Code", "Claude Cowork", "Codex", "Cursor", "Grok Bot", "GitHub"];
 ---
 
 <!doctype html>
@@ -69,13 +81,13 @@ const sources = ["Claude Code", "Claude Cowork", "Codex", "Cursor", "GitHub"];
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>tokenmaxxing · a pixel town for people who run AI coding agents</title>
+    <title>tokenmaxxing · a tiny 3D town for people who run AI coding agents</title>
     <meta
       name="description"
-      content="A tiny multiplayer pixel town for people who run AI coding agents. Your tokens become a character, a house and a place on the leaderboard."
+      content="A tiny multiplayer 3D town for people who run AI coding agents. Your tokens become a character, a house and a place on the leaderboard."
     />
     <meta property="og:title" content="tokenmaxxing" />
-    <meta property="og:description" content="A tiny pixel town for people who run AI coding agents" />
+    <meta property="og:description" content="A tiny 3D town for people who run AI coding agents" />
     <meta property="og:image" content="https://tokenmaxxing.dk/shots/hero.webp" />
     <meta property="og:site_name" content="tokenmaxxing" />
     <meta name="theme-color" content="#1b1f2a" />
@@ -91,12 +103,14 @@ const sources = ["Claude Code", "Claude Cowork", "Codex", "Cursor", "GitHub"];
     <main>
       <section class="hero wrap">
         <img class="app-icon" src="/icon.svg" width="112" height="112" alt="The Tokenmaxxing app icon" />
-        <p class="kicker">A multiplayer pixel game for macOS</p>
+        <p class="kicker">A multiplayer 3D game for macOS</p>
         <h1>A tiny town for people who run AI coding agents</h1>
         <p class="lead">
           Your tokens become a character, a house and a place on the leaderboard. See who is shipping, start a company,
           and challenge your friends to burn the most tokens in an hour.
         </p>
+        {/* The server writes the count in (server/src/main.ts); with no count the line hides. */}
+        <p class="players"><strong set:html="<!--players-->" /> people have moved into town</p>
         <div class="actions">
           <a class="button primary" href={DOWNLOAD}>Download for macOS</a>
           <a class="button" href={GITHUB}>View on GitHub</a>
@@ -107,7 +121,7 @@ const sources = ["Claude Code", "Claude Cowork", "Codex", "Cursor", "GitHub"];
           src="/shots/hero.webp"
           width="1440"
           height="900"
-          alt="The whole town: company houses with people in the windows, the square with its fountain, and players chatting"
+          alt="The town square: players chatting round the fountain, with company houses and the Tavern around it"
         />
       </section>
 
@@ -208,7 +222,6 @@ const sources = ["Claude Code", "Claude Cowork", "Codex", "Cursor", "GitHub"];
     height: auto;
     border: 1px solid var(--line);
     border-radius: 10px;
-    image-rendering: pixelated;
   }
   h1,
   h2,
@@ -267,6 +280,15 @@ const sources = ["Claude Code", "Claude Cowork", "Codex", "Cursor", "GitHub"];
     color: var(--muted);
     max-width: 44em;
     margin: 0 auto 24px;
+  }
+  .players {
+    margin: -8px 0 24px;
+  }
+  .players strong {
+    color: var(--accent);
+  }
+  .players:has(strong:empty) {
+    display: none;
   }
   .actions {
     display: flex;

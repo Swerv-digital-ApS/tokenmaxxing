@@ -3,8 +3,9 @@
  * state, so the server runs them, the client shares their types and helpers, and
  * tests need no server. Adding a game is one `GameDef` plus one React component.
  */
+import { isRecord } from "hanzio";
 
-export type GameId = "spr" | "hype" | "dice" | "tokenmaxxing";
+export type GameId = "spr" | "hype" | "dice" | "sprint" | "tokenmaxxing";
 
 /** The host's choices when opening a table, e.g. `{ minutes: 60 }`. */
 export type Options = Record<string, string | number>;
@@ -80,5 +81,26 @@ export interface GameDef<State = unknown, View = unknown> {
 }
 
 export const refused = (why: string) => ({ refused: why });
+
 export const isRefused = (r: unknown): r is { refused: string } =>
-  typeof r === "object" && r !== null && "refused" in r && Object.keys(r).length === 1;
+  isRecord(r) && "refused" in r && Object.keys(r).length === 1;
+
+/** `forfeit` for a game that lists who left (`forfeited`): adds them, once. */
+export const leave = <S extends { forfeited: readonly number[] }>(s: S, player: number): S =>
+  s.forfeited.includes(player) ? s : { ...s, forfeited: [...s.forfeited, player] };
+
+/** Players who left, a place each: whoever left last places best among them. */
+export const leavers = (out: readonly number[]): number[][] => [...out].reverse().map((p) => [p]);
+
+/** Once at most one player is left, the game is over: them, then whoever left. Null while it's on. */
+export const lastStanding = (
+  left: readonly number[],
+  out: readonly number[],
+): { places: number[][] } | null =>
+  left.length <= 1 ? { places: [[...left], ...leavers(out)].filter((g) => g.length > 0) } : null;
+
+/** Players grouped by score, highest first: a tie shares a place. */
+export function byScore(players: readonly number[], score: (player: number) => number): number[][] {
+  const scores = [...new Set(players.map(score))].sort((a, b) => b - a);
+  return scores.map((n) => players.filter((p) => score(p) === n));
+}

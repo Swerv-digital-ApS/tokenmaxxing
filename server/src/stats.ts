@@ -2,6 +2,7 @@
  * Turns daily rollups into totals and rankings. Pure, so it's tested without
  * Rivet; the `town` actor feeds it rows straight from SQLite.
  */
+import { isOneOf, sumBy } from "hanzio";
 import { computeRowCostUsd, type PricingCache, roundUsd } from "./pricing.ts";
 
 /** One model's sums for one user and day (or range, once summed). */
@@ -27,10 +28,10 @@ export interface ActivityRow {
 
 export type SortKey = "tokens" | "cost" | "hours" | "parallelism" | "prs";
 const SORT_KEYS: readonly SortKey[] = ["tokens", "cost", "hours", "parallelism", "prs"];
-export const isSortKey = (v: unknown): v is SortKey => SORT_KEYS.includes(v as SortKey);
+export const isSortKey = (v: unknown): v is SortKey => isOneOf(SORT_KEYS, v);
 
 /** Below this, parallelism is null so one short burst can't top the board. */
-export const MIN_ACTIVE_HOURS = 1;
+const MIN_ACTIVE_HOURS = 1;
 /** Agents are counted per 5-minute bucket (parallelism and agent hours). */
 export const AGENT_BUCKET_MS = 5 * 60_000;
 const BUCKET_HOURS = AGENT_BUCKET_MS / 3_600_000;
@@ -133,22 +134,21 @@ export function rank<T extends Totals & { name: string }>(
 
 /** A company's totals: its members' summed, with parallelism as agents running at once across the company. */
 export function companyTotals(members: readonly Totals[]): Totals {
-  const sum = (f: (t: Totals) => number) => members.reduce((n, t) => n + f(t), 0);
   const running = members.filter((t) => t.parallelism !== null);
-  const tokens = sum((t) => t.tokens);
-  const activeHours = Math.round(sum((t) => t.activeHours) * 100) / 100;
+  const tokens = sumBy(members, "tokens");
+  const activeHours = Math.round(sumBy(members, "activeHours") * 100) / 100;
   return {
     tokens,
-    inputTokens: sum((t) => t.inputTokens),
-    outputTokens: sum((t) => t.outputTokens),
-    cacheCreationTokens: sum((t) => t.cacheCreationTokens),
-    cacheReadTokens: sum((t) => t.cacheReadTokens),
-    costUsd: roundUsd(sum((t) => t.costUsd)),
-    turns: sum((t) => t.turns),
-    prompts: sum((t) => t.prompts),
-    prs: sum((t) => t.prs),
-    parallelism: running.length ? Math.round(sum((t) => t.parallelism ?? 0) * 100) / 100 : null,
-    peakAgents: sum((t) => t.peakAgents),
+    inputTokens: sumBy(members, "inputTokens"),
+    outputTokens: sumBy(members, "outputTokens"),
+    cacheCreationTokens: sumBy(members, "cacheCreationTokens"),
+    cacheReadTokens: sumBy(members, "cacheReadTokens"),
+    costUsd: roundUsd(sumBy(members, "costUsd")),
+    turns: sumBy(members, "turns"),
+    prompts: sumBy(members, "prompts"),
+    prs: sumBy(members, "prs"),
+    parallelism: running.length ? Math.round(sumBy(members, "parallelism") * 100) / 100 : null,
+    peakAgents: sumBy(members, "peakAgents"),
     activeHours,
     tokensPerActiveHour: activeHours >= MIN_ACTIVE_HOURS ? Math.round(tokens / activeHours) : null,
     topModel: null,

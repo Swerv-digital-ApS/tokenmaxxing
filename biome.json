@@ -9,7 +9,7 @@
     "includes": ["**", "!server/src/pricing-fallback.json", "!.release-please-manifest.json", "!CHANGELOG.md"]
   },
   "formatter": {
-    "enabled": true,
+    "enabled": false,
     "indentStyle": "space",
     "indentWidth": 2,
     "lineWidth": 110
@@ -37,6 +37,7 @@
   "overrides": [
     {
       "includes": ["**/*.astro"],
+      "formatter": { "enabled": true },
       "linter": {
         "rules": {
           "correctness": {

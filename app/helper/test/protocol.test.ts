@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { fileURLToPath } from "node:url";
 import type { AppState, Message } from "@tokenmaxxing/core/protocol.ts";
 
 /**
@@ -45,7 +46,9 @@ const messages: Message[] = [
 ];
 
 test("writes the desktop app's contract fixture", async () => {
-  const path = new URL("../../desktop/src-tauri/tests/fixtures/messages.ndjson", import.meta.url).pathname;
+  const path = fileURLToPath(
+    new URL("../../desktop/src-tauri/tests/fixtures/messages.ndjson", import.meta.url),
+  );
   const body = `${messages.map((m) => JSON.stringify(m)).join("\n")}\n`;
   await Bun.write(path, body);
   expect(await Bun.file(path).text()).toBe(body);

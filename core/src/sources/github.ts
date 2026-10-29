@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { once } from "hanzio";
 import { type GithubProblem, type TokenEvent, tokenEvent } from "../types.ts";
 
 /** A GUI app starts with a bare PATH, so look where installers put `gh`. */
@@ -39,7 +40,7 @@ export type GhRunner = (args: string[]) => Promise<{ ok: boolean; out: string }>
 let shellGh: string | null | undefined;
 
 /** `gh` on the usual paths, else wherever the user's interactive shell finds it (mise, asdf, …). */
-export function ghPath(): string | null {
+function ghPath(): string | null {
   const found = GH_PATHS.find((p) => existsSync(p)) ?? Bun.which("gh");
   if (found) return found;
   // ponytail: asked once per run, so a `gh` installed off the usual paths needs an app restart.
@@ -59,7 +60,7 @@ export function ghPath(): string | null {
   return shellGh;
 }
 
-export function ghRunner(gh: string): GhRunner {
+function ghRunner(gh: string): GhRunner {
   return async (args) => {
     const p = Bun.spawn([gh, ...args], {
       stdout: "pipe",
@@ -97,51 +98,46 @@ async function ghAccounts(gh: GhRunner): Promise<GithubAccount[]> {
   return accounts;
 }
 
-let savedGitLogin: Promise<GithubAccount | null> | undefined;
-
 /**
  * The github.com login git saved for HTTPS pushes (Keychain, Git Credential Manager), for people
  * without `gh`. Never prompts: no terminal, no browser.
  */
-function gitAccount(): Promise<GithubAccount | null> {
+const gitAccount = once(async (): Promise<GithubAccount | null> => {
   // ponytail: once per run, so a credential helper that does show a dialog shows it at most once.
-  savedGitLogin ??= (async () => {
-    const git =
-      GIT_PATHS.find((p) => existsSync(p)) ?? (process.platform === "darwin" ? null : Bun.which("git"));
-    if (!git) return null;
-    try {
-      const p = Bun.spawn([git, "credential", "fill"], {
-        stdin: new Blob(["protocol=https\nhost=github.com\n\n"]),
-        stdout: "pipe",
-        stderr: "ignore",
-        env: {
-          ...process.env,
-          GIT_TERMINAL_PROMPT: "0",
-          GCM_INTERACTIVE: "never",
-          GIT_ASKPASS: "",
-          SSH_ASKPASS: "",
-        },
-      });
-      const timer = setTimeout(() => p.kill(), 10_000);
-      const [out, code] = await Promise.all([new Response(p.stdout).text(), p.exited]);
-      clearTimeout(timer);
-      if (code !== 0) return null;
+  const git =
+    GIT_PATHS.find((p) => existsSync(p)) ?? (process.platform === "darwin" ? null : Bun.which("git"));
+  if (!git) return null;
+  try {
+    const p = Bun.spawn([git, "credential", "fill"], {
+      stdin: new Blob(["protocol=https\nhost=github.com\n\n"]),
+      stdout: "pipe",
+      stderr: "ignore",
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: "0",
+        GCM_INTERACTIVE: "never",
+        GIT_ASKPASS: "",
+        SSH_ASKPASS: "",
+      },
+    });
+    const timer = setTimeout(() => p.kill(), 10_000);
+    const [out, code] = await Promise.all([new Response(p.stdout).text(), p.exited]);
+    clearTimeout(timer);
+    if (code !== 0) return null;
 
-      // `key=value` lines; a password may itself contain `=`.
-      const fields: Record<string, string> = {};
-      for (const line of out.split("\n")) {
-        const at = line.indexOf("=");
-        if (at > 0) fields[line.slice(0, at)] = line.slice(at + 1);
-      }
-      if (!fields.password) return null;
-      return { host: "github.com", login: fields.username ?? "", token: fields.password };
-    } catch {
-      // No git, or a helper that crashed: there's no saved login to use.
-      return null;
+    // `key=value` lines; a password may itself contain `=`.
+    const fields: Record<string, string> = {};
+    for (const line of out.split("\n")) {
+      const at = line.indexOf("=");
+      if (at > 0) fields[line.slice(0, at)] = line.slice(at + 1);
     }
-  })();
-  return savedGitLogin;
-}
+    if (!fields.password) return null;
+    return { host: "github.com", login: fields.username ?? "", token: fields.password };
+  } catch {
+    // No git, or a helper that crashed: there's no saved login to use.
+    return null;
+  }
+});
 
 /** `gh`'s accounts, else git's saved github.com login, else why there's neither. */
 export async function githubAccounts(

@@ -1,5 +1,5 @@
 import { blockOf, type GameMap, PLOT_H, PLOT_W, plotId } from "@tokenmaxxing/core/maps.ts";
-import { type Peek, TILE } from "@tokenmaxxing/core/world.ts";
+import { type CompanyInfo, type Peek, TILE } from "@tokenmaxxing/core/world.ts";
 import type { Pane } from "../art/buildings.ts";
 import { characterFrame, sleeperFrame } from "../art/characters.ts";
 import { world } from "./world.ts";
@@ -36,9 +36,56 @@ export function buildings(map: GameMap): Building[] {
 export const buildingAt = (x: number, y: number): Building | undefined =>
   buildings(world.map).find((b) => x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h);
 
-export function companyOnPlot(plot: number) {
-  for (const c of world.companies.values()) if (c.plot === plot) return c;
-  return undefined;
+/** Largest building the door search walks through; past that it is fences or trees, not a building. */
+const BUILDING_MAX_TILES = 120;
+
+/**
+ * The door of the building at (`x`, `y`): through the building's own (unwalkable) tiles to the nearest
+ * way in. Null off a building, on anything with a use of its own (a bench, a fountain).
+ */
+export function doorOf(map: GameMap, x: number, y: number): [number, number] | null {
+  if (!map.contains(x, y) || map.walkable(x, y)) return null;
+  const k = map.kind(x, y);
+  if (k.portal || k.seat || k.pours || k.serves || k.tosses || k.shop || k.counter || k.poker || k.roulette)
+    return null;
+  const seen = new Set([`${x},${y}`]);
+  const queue: [number, number][] = [[x, y]];
+  let best: [number, number] | null = null;
+  let bestD = Infinity;
+  for (let i = 0; i < queue.length; i++) {
+    if (seen.size > BUILDING_MAX_TILES) return null;
+    const [cx, cy] = queue[i]!;
+    for (const [dx, dy] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ] as const) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      const key = `${nx},${ny}`;
+      if (seen.has(key) || !map.contains(nx, ny)) continue;
+      seen.add(key);
+      if (map.kind(nx, ny).portal) {
+        const d = Math.abs(nx - x) + Math.abs(ny - y);
+        if (d < bestD) [best, bestD] = [[nx, ny], d];
+      } else if (!map.walkable(nx, ny)) queue.push([nx, ny]);
+    }
+  }
+  return best;
+}
+
+/** Each plot's company, worked out again when the world's companies are replaced (`setCompanies`). */
+let plotsOf: Map<number, CompanyInfo> | null = null;
+const onPlot = new Map<number, CompanyInfo>();
+
+export function companyOnPlot(plot: number): CompanyInfo | undefined {
+  if (plotsOf !== world.companies) {
+    plotsOf = world.companies;
+    onPlot.clear();
+    for (const c of world.companies.values()) if (!onPlot.has(c.plot)) onPlot.set(c.plot, c);
+  }
+  return onPlot.get(plot);
 }
 
 const logos = new Map<string, HTMLImageElement | null>();

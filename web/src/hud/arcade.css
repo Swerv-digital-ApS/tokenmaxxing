@@ -19,7 +19,8 @@
   background: rgba(255, 255, 255, 0.04);
 }
 
-.row-actions {
+.row-actions,
+.side-bet {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -130,7 +131,6 @@
 }
 
 .invite-toast {
-  top: 110px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -198,13 +198,6 @@
 
 .match-result strong {
   color: var(--accent);
-}
-
-.side-bet {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
 }
 
 .side-bet input {

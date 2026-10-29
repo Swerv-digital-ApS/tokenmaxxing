@@ -1,5 +1,6 @@
 import { secondsUntil } from "@tokenmaxxing/core/format.ts";
 import { type DiceView, FACES } from "@tokenmaxxing/core/games/dice.ts";
+import { sumBy } from "hanzio";
 import { useState } from "react";
 import type { GameProps } from "./types.ts";
 
@@ -7,7 +8,7 @@ const CLAIMABLE = [2, 3, 4, 5, 6];
 
 export function Dice({ view, info, you, now, move, name }: GameProps<DiceView>) {
   const last = view.claims.at(-1);
-  const onTable = Object.values(view.counts).reduce((a, b) => a + b, 0);
+  const onTable = sumBy(Object.values(view.counts), (n) => n);
   const myTurn = you === view.turn && !view.reveal && !info.outcome;
   const seconds = secondsUntil(view.deadline, now);
   const r = view.reveal;

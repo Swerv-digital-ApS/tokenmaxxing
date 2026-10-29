@@ -1,32 +1,21 @@
 import { compact, plural } from "@tokenmaxxing/core/format.ts";
 import type { RangeKey } from "@tokenmaxxing/core/range.ts";
 import { houseTierName } from "@tokenmaxxing/core/world.ts";
-import type { CompanyProfile } from "@tokenmaxxing/server/registry";
-import { useEffect, useState } from "react";
-import { errorText, town } from "../net.ts";
+import { useState } from "react";
+import { town } from "../net.ts";
 import { hud, useHud } from "../store.ts";
+import { coins } from "./format.ts";
+import { BoardRow } from "./Leaderboard.tsx";
 import { DailyChart, RANGES, StatsGrid } from "./PlayerCard.tsx";
-import { AvatarImage, House, Modal, Pills } from "./ui.tsx";
+import { AvatarImage, House, Modal, Pills, useLoad } from "./ui.tsx";
 
 const openCard = (userId: number) => hud.set({ panel: { kind: "card", userId } });
 
 /** A company's page, like a player's: its house and logo, website, numbers and people. */
 export function CompanyCard({ companyId }: { companyId: number }) {
   const [range, setRange] = useState<RangeKey>("7d");
-  const [c, setC] = useState<CompanyProfile | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { data: c, error } = useLoad(() => town.company(companyId, range), [companyId, range]);
   const mine = useHud((s) => s.me?.company?.id === companyId);
-
-  useEffect(() => {
-    let live = true;
-    town.company(companyId, range).then(
-      (r) => live && setC(r),
-      (e) => live && setError(errorText(e)),
-    );
-    return () => {
-      live = false;
-    };
-  }, [companyId, range]);
 
   if (error) return <Modal title="Company">{error}</Modal>;
   if (!c) return <Modal title="Company">Loading…</Modal>;
@@ -40,6 +29,9 @@ export function CompanyCard({ companyId }: { companyId: number }) {
           <p>
             <strong>{houseTierName(c.tier)}</strong> · {plural(c.members.length, "member")}
           </p>
+          <p className="wallet">
+            <strong>{coins(c.wallet)}</strong> <span className="muted small">in the company wallet</span>
+          </p>
           {c.website && (
             <p>
               <a href={`https://${c.website}`} target="_blank" rel="noreferrer noopener">
@@ -52,11 +44,16 @@ export function CompanyCard({ companyId }: { companyId: number }) {
               #{c.rank} in town {RANGES.find(([k]) => k === range)?.[1].toLowerCase()}
             </p>
           )}
-          {mine && (
-            <button type="button" onClick={() => hud.set({ panel: { kind: "company" } })}>
-              Manage your company
+          <p className="company-actions">
+            <button type="button" onClick={() => hud.set({ panel: { kind: "merch", companyId: c.id } })}>
+              👕 Merch shop
             </button>
-          )}
+            {mine && (
+              <button type="button" onClick={() => hud.set({ panel: { kind: "company" } })}>
+                Manage your company
+              </button>
+            )}
+          </p>
         </div>
       </div>
       <Pills value={range} options={RANGES} onChange={setRange} />
@@ -65,26 +62,20 @@ export function CompanyCard({ companyId }: { companyId: number }) {
       <h3>People</h3>
       <ol className="lb-list company-people">
         {c.members.map((m) => (
-          <li key={m.userId}>
-            <button type="button" className="lb-item" onClick={() => openCard(m.userId)}>
-              <AvatarImage look={m.look} scale={2} />
-              <span className="lb-who">
-                <span className="lb-line">
-                  <strong>
-                    {m.name}
-                    {m.isOwner && " 👑"}
-                  </strong>
-                  <small className="muted">Lv{m.level}</small>
-                </span>
-                <span className="lb-bar">
-                  <span style={{ width: `${Math.max(0.02, m.tokens / top) * 100}%` }} />
-                </span>
-              </span>
-              <span className="lb-values">
-                <span className="lb-value">{compact(m.tokens)}</span>
-              </span>
-            </button>
-          </li>
+          <BoardRow
+            key={m.userId}
+            picture={<AvatarImage look={m.look} scale={2} />}
+            name={
+              <>
+                {m.name}
+                {m.isOwner && " 👑"}
+              </>
+            }
+            sub={`Lv${m.level}`}
+            share={Math.max(0.02, m.tokens / top)}
+            value={compact(m.tokens)}
+            onClick={() => openCard(m.userId)}
+          />
         ))}
       </ol>
     </Modal>

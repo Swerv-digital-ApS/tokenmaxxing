@@ -17,6 +17,7 @@ import {
 import type { GameId, Options, Outcome } from "@tokenmaxxing/core/games/types.ts";
 import type { Lobby, MatchInfo, TableView } from "@tokenmaxxing/core/games/wire.ts";
 import type { Battle } from "@tokenmaxxing/core/protocol.ts";
+import { isRecord, isString, must, sortBy } from "hanzio";
 import { actor, UserError } from "rivetkit";
 import type { Client } from "rivetkit/client";
 import { RateLimiter } from "../rate-limit.ts";
@@ -28,12 +29,12 @@ import {
   INTERNAL_KEY,
   main,
   matchOf,
+  notify,
   requireInternal,
   requireMain,
   requireSyncer,
   requireUser,
   serial,
-  type TokenCache,
   waitForTick,
 } from "./shared.ts";
 
@@ -76,6 +77,8 @@ interface Live {
   line?: string;
   /** `world` has let the players go (retried until it has). */
   released?: boolean;
+  /** When its match last moved on (held games), or reported how it ended. */
+  movedAt?: number;
 }
 
 interface ArcadeState {
@@ -98,6 +101,14 @@ const INVITES_PER_MIN = 10;
 /** A match still unfinished this long after it started is stuck: it's called off and refunded. */
 const HOUR = 3_600_000;
 const stuckAfter = (game: GameId) => (GAMES[game]?.holdPlayers === false ? 25 * HOUR : 30 * 60_000);
+/**
+ * A held game whose match hasn't moved on in this long has stopped (an engine hiccup can leave its
+ * match dead), and is called off the same way. Nobody moving, the rules still move it on within a
+ * minute: a pick is 15 s, a turn 30 s, a Hype Cycle round at most 47 s plus 6 s between rounds.
+ */
+const QUIET_MS = 3 * 60_000;
+const stopped = (live: Live, now: number) =>
+  GAMES[live.game]?.holdPlayers !== false && now - (live.movedAt ?? live.startedAt) > QUIET_MS;
 /** People one open or invite can name. */
 const MAX_INVITEES = 12;
 /** How often expired invites, stale tables and stuck or finished matches are swept. */
@@ -111,16 +122,17 @@ export const arcade = actor({
   state: { nextId: 1, tables: {}, matches: {}, names: {} } as ArcadeState,
   createVars: () => ({
     serial: serial(),
-    tokens: new Map() as TokenCache,
     invites: new RateLimiter(INVITES_PER_MIN, 60_000),
   }),
-  createConnState: (c, params: ConnParams): Promise<Caller> =>
-    authenticate(params, c.client(), c.vars.tokens),
+  createConnState: (c, params: ConnParams): Promise<Caller> => authenticate(params, c.client()),
   run: async (c): Promise<void> => {
     const signal = c.abortSignal;
     const run = c.vars.serial;
     while (await waitForTick(signal, SWEEP_MS)) {
-      await c.keepAwake(run(() => (signal.aborted ? Promise.resolve() : sweep(c, Date.now()))));
+      // A failed sweep (a refund while `town` is down) is retried next time, not the end of the loop.
+      await c
+        .keepAwake(run(() => (signal.aborted ? Promise.resolve() : sweep(c, Date.now()))))
+        .catch((err) => console.warn(`[arcade] sweep: ${String(err)}`));
     }
   },
   actions: {
@@ -132,7 +144,7 @@ export const arcade = actor({
         const userId = requireUser(c.conn.state);
         const game = gameOf(rawGame);
         if (!game) throw new UserError("That game doesn't exist.", { code: "not_found" });
-        const o = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+        const o: Record<string, unknown> = isRecord(raw) ? raw : {};
         const stake = parseStake(o.stake ?? 0);
         const seats = o.seats ?? game.players.max;
         if (
@@ -369,11 +381,21 @@ export const arcade = actor({
       return live ? matchOf(c.client(), live.id).usage(userId) : Promise.resolve(null);
     },
 
+    /** A held game's match moved on: it hasn't stopped. */
+    moved: (c, matchId: number): void => {
+      requireInternal(c.conn.state);
+      const live = c.state.matches[String(matchId)];
+      if (live && !live.outcome) live.movedAt = Date.now();
+    },
+
     finished: (c, matchId: number, outcome: Outcome): Promise<void> =>
       c.vars.serial(async () => {
         requireInternal(c.conn.state);
         const live = c.state.matches[String(matchId)];
-        if (!live || live.outcome) return;
+        if (!live) return forgotten(c, matchId);
+        if (live.outcome) return;
+        // A payout that keeps failing (the match retries) isn't a stopped game to refund.
+        live.movedAt = Date.now();
         await settle(c, live, outcome);
         push(c);
       }),
@@ -403,9 +425,7 @@ function parseStake(raw: unknown): number {
 }
 
 function tableOf(s: ArcadeState, id: unknown): Table {
-  const table = s.tables[String(id)];
-  if (!table) throw new UserError("That table is gone.", { code: "not_found" });
-  return table;
+  return must(s.tables[String(id)], () => new UserError("That table is gone.", { code: "not_found" }));
 }
 
 function hostedTable(s: ArcadeState, userId: number, id: unknown): Table {
@@ -433,7 +453,7 @@ async function learnNames(c: ArcadeCtx, userIds: number[]): Promise<void> {
 async function resolve(c: ArcadeCtx, raw: unknown): Promise<number[]> {
   const list = Array.isArray(raw) ? raw.slice(0, MAX_INVITEES) : [];
   const ids = list.filter((x): x is number => Number.isInteger(x));
-  const names = list.filter((x): x is string => typeof x === "string");
+  const names = list.filter(isString);
   if (names.length === 0) return ids;
   const found = await main(c.client()).town.ids(names);
   return [...ids, ...Object.values(found)];
@@ -559,6 +579,11 @@ async function settle(c: ArcadeCtx, live: Live, outcome: Outcome): Promise<void>
   live.outcome = outcome;
   live.endedAt = Date.now();
   live.line = line;
+  // The tournament board counts a head-to-head result (it ignores matches that aren't its own).
+  if ("places" in outcome && live.players.length === 2)
+    await town
+      .tournamentResult(live.game, live.players, winners)
+      .catch((err) => console.warn(`[arcade] tournament result ${live.id}: ${String(err)}`));
   await release(c, live);
   for (const p of live.players) await tell(client, p, line);
 }
@@ -572,6 +597,17 @@ async function release(c: ArcadeCtx, live: Live): Promise<void> {
   } catch (err) {
     console.warn(`[arcade] releasing match ${live.id}: ${String(err)}`);
   }
+}
+
+/**
+ * A match the arcade doesn't know ended: it started after the arcade's last save, which a restart lost.
+ * Everyone gets their coins back (nothing, if it was paid out) and goes.
+ */
+async function forgotten(c: ArcadeCtx, id: number): Promise<void> {
+  const { town, world } = main(c.client());
+  await town.refund(tableRef(id));
+  await town.refund(betsRef(id));
+  await world.release(id, [], "");
 }
 
 async function closeTable(c: ArcadeCtx, table: Table, why: string): Promise<void> {
@@ -596,7 +632,7 @@ async function sweep(c: ArcadeCtx, now: number): Promise<void> {
     }
   }
   for (const live of Object.values(c.state.matches)) {
-    if (!live.outcome && now - live.startedAt > stuckAfter(live.game)) {
+    if (!live.outcome && (now - live.startedAt > stuckAfter(live.game) || stopped(live, now))) {
       await settle(c, live, { void: `${gameName(live)} got stuck and was called off.` }).catch((err) =>
         console.warn(`[arcade] voiding match ${live.id}: ${String(err)}`),
       );
@@ -656,7 +692,13 @@ const matchInfo = (s: ArcadeState, m: Live): MatchInfo => ({
   outcome: m.outcome,
 });
 
-function lobbyFor(s: ArcadeState, userId: number): Lobby {
+/** What every lobby shows the same: each table's view, and every match. */
+const shared = (s: ArcadeState) => ({
+  tables: new Map(Object.values(s.tables).map((t) => [t.id, tableView(s, t)])),
+  matches: Object.values(s.matches).map((m) => matchInfo(s, m)),
+});
+
+function lobbyFor(s: ArcadeState, userId: number, views = shared(s)): Lobby {
   const tables = Object.values(s.tables).filter(
     (t) => t.open || t.seated.includes(userId) || t.invited.some((i) => i.userId === userId),
   );
@@ -664,29 +706,35 @@ function lobbyFor(s: ArcadeState, userId: number): Lobby {
   // Your running game; else the one you just finished (its end screen and rematch offer).
   const mineAll = Object.values(s.matches).filter((m) => m.players.includes(userId));
   const playing =
-    mineAll.find((m) => !m.outcome) ?? mineAll.sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))[0];
+    mineAll.find((m) => !m.outcome) ?? sortBy(mineAll, { by: (m) => m.endedAt ?? 0, order: "desc" })[0];
   const bets: Lobby["me"]["bets"] = {};
   for (const m of Object.values(s.matches)) {
     const b = m.bets.find((x) => x.userId === userId);
     if (b) bets[m.id] = { on: b.on, amount: b.amount };
   }
   return {
-    tables: tables.map((t) => tableView(s, t)),
-    matches: Object.values(s.matches).map((m) => matchInfo(s, m)),
+    tables: tables.map((t) => views.tables.get(t.id)!),
+    matches: views.matches,
     me: { table: mine?.id ?? null, match: playing?.id ?? null, bets },
   };
 }
 
-/** Everyone connected gets their own lobby: open tables plus the private ones that are theirs. */
+/**
+ * Everyone connected gets their own lobby: open tables plus the private ones that are theirs. What's
+ * the same for everyone is built once, and each player's once however many tabs they have.
+ */
 function push(c: ArcadeCtx): void {
+  const views = shared(c.state);
+  const lobbies = new Map<number, Lobby>();
   for (const conn of c.conns.values()) {
     const caller = conn.state as Caller;
-    if (caller.kind === "user") conn.send("lobby", lobbyFor(c.state, caller.userId));
+    if (caller.kind !== "user") continue;
+    const lobby = lobbies.get(caller.userId) ?? lobbyFor(c.state, caller.userId, views);
+    lobbies.set(caller.userId, lobby);
+    conn.send("lobby", lobby);
   }
 }
 
 /** A toast for one player, through `world` (the tab they have open). */
 const tell = (client: Client<typeof registry>, userId: number, text: string) =>
-  main(client)
-    .world.notify(userId, text)
-    .catch(() => {});
+  notify(client, userId, { text });

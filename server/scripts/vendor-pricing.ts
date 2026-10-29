@@ -15,6 +15,8 @@
  *   bun run scripts/vendor-pricing.ts --check  # exit 1 if stale, write nothing
  */
 
+import { safeJsonParse } from "hanzio";
+
 const LITELLM_URL =
   "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 const TARGET = new URL("../src/pricing-fallback.json", import.meta.url).pathname;
@@ -32,14 +34,12 @@ if (!res.ok) {
 }
 const body = await res.text();
 
-let parsed: Record<string, unknown>;
-try {
-  parsed = JSON.parse(body) as Record<string, unknown>;
-} catch (err) {
-  console.error(`vendor-pricing: upstream is not valid JSON: ${err}`);
+const parsed = safeJsonParse<Record<string, unknown>>(body);
+if (!parsed.ok) {
+  console.error(`vendor-pricing: upstream is not valid JSON: ${parsed.error}`);
   process.exit(1);
 }
-const count = Object.keys(parsed).length;
+const count = Object.keys(parsed.data).length;
 if (count < MIN_MODELS) {
   console.error(`vendor-pricing: upstream has only ${count} models (< ${MIN_MODELS}); refusing`);
   process.exit(1);

@@ -7,38 +7,31 @@ import { clock, compact } from "@tokenmaxxing/core/format.ts";
 import { propTiles } from "@tokenmaxxing/core/games/gather.ts";
 import { GAMES } from "@tokenmaxxing/core/games/index.ts";
 import { TILE, type WorldGame } from "@tokenmaxxing/core/world.ts";
+import { isTruthy } from "hanzio";
 import { C } from "../art/palette.ts";
 import { arenaDesk, gameTable } from "../art/tables.ts";
 import { openMatch } from "../net.ts";
 import { hud } from "../store.ts";
+import type { Frame } from "./frame.ts";
 import { bubble, FONT, pill } from "./labels.ts";
-import { drawPos, world } from "./world.ts";
+import { startLine } from "./race.ts";
+import { drawPos, serverNow, world } from "./world.ts";
 
 /** Banners and signs this frame, in canvas (device) pixels. */
 export const gameHits: { x: number; y: number; w: number; h: number; open: () => void }[] = [];
 
-type Draw = { y: number; draw: () => void };
-type ToScreen = (px: number, py: number) => readonly [number, number];
-
-export function drawGames(
-  g: CanvasRenderingContext2D,
-  items: Draw[],
-  labels: (() => void)[],
-  toScreen: ToScreen,
-  now: number,
-  dpr: number,
-): void {
+export function drawGames(f: Frame): void {
   gameHits.length = 0;
-  const serverNow = Date.now() - hud.get().clockSkew;
+  const at = serverNow();
   if (world.room === "town")
     for (const game of world.games.values()) {
-      if (game.spot.kind === "table") drawTable(g, game, items, labels, toScreen, serverNow, now, dpr);
-      else drawArena(g, game, items, labels, toScreen, serverNow, now, dpr);
+      if (game.spot.kind === "table") drawTable(f, game, at);
+      else drawArena(f, game, at);
     }
-  drawSigns(g, labels, toScreen, now, dpr);
+  drawSigns(f);
 }
 
-function banner(game: WorldGame, serverNow: number): string {
+export function banner(game: WorldGame, serverNow: number): string {
   const def = GAMES[game.game]!;
   const info = hud.get().lobby?.matches.find((m) => m.id === game.id);
   return [
@@ -48,26 +41,22 @@ function banner(game: WorldGame, serverNow: number): string {
     info && info.pot > 0 ? `🪙 ${info.pot}` : null,
     game.watchers > 0 ? `👀 ${game.watchers}` : null,
   ]
-    .filter(Boolean)
+    .filter(isTruthy)
     .join(" · ");
 }
 
-function drawTable(
-  g: CanvasRenderingContext2D,
-  game: WorldGame,
-  items: Draw[],
-  labels: (() => void)[],
-  toScreen: ToScreen,
-  serverNow: number,
-  now: number,
-  dpr: number,
-): void {
+function drawTable(f: Frame, game: WorldGame, serverNow: number): void {
+  const { g, dpr, now } = f;
   const [[tx, ty]] = propTiles(game.spot) as [[number, number]];
-  items.push({ y: (ty + 1) * TILE - 2, draw: () => g.drawImage(gameTable(game.game), tx * TILE, ty * TILE) });
+  f.items.push({
+    y: (ty + 1) * TILE - 2,
+    draw: () => g.drawImage(gameTable(game.game), tx * TILE, ty * TILE),
+  });
+  startLine(f, game);
   // Just above the seated players' own labels (a name and a game tag: two pills), not the spot's top.
   const head = Math.min(...game.seats.map((s) => s.y)) * TILE;
-  const [sx, sy] = toScreen((game.spot.x + game.spot.w / 2) * TILE, head);
-  labels.push(() => {
+  const [sx, sy] = f.toScreen((game.spot.x + game.spot.w / 2) * TILE, head);
+  f.labels.push(() => {
     const y = sy - 42 * dpr;
     const { w, h } = pill(g, sx, y, banner(game, serverNow), dpr, "rgba(233, 183, 61, 0.95)", C.ink);
     gameHits.push({ x: sx - w / 2, y: y - h, w, h, open: () => openMatch(game.id) });
@@ -77,16 +66,8 @@ function drawTable(
 }
 
 /** Tokenmaxxing's arena: a desk per player and a live scoreboard above them. */
-function drawArena(
-  g: CanvasRenderingContext2D,
-  game: WorldGame,
-  items: Draw[],
-  labels: (() => void)[],
-  toScreen: ToScreen,
-  serverNow: number,
-  now: number,
-  dpr: number,
-): void {
+function drawArena(f: Frame, game: WorldGame, serverNow: number): void {
+  const { g, dpr, now } = f;
   const rows = game.board ?? [];
   const rank = new Map(rows.map((r, i) => [r.player, i]));
   for (const [i, seat] of game.seats.entries()) {
@@ -95,13 +76,13 @@ function drawArena(
     const place = rank.get(player) ?? rows.length;
     const speed = 120 + place * 90;
     const glow = place === 0 ? 3 : Math.floor(now / speed) % 2 === 0 ? 2 : 1;
-    items.push({
+    f.items.push({
       y: (seat.y - 1) * TILE + TILE - 1,
       draw: () => g.drawImage(arenaDesk(glow), seat.x * TILE, (seat.y - 1) * TILE),
     });
   }
-  const [sx, sy] = toScreen((game.spot.x + game.spot.w / 2) * TILE, game.spot.y * TILE);
-  labels.push(() => scoreboard(g, game, sx, sy - 10 * dpr, serverNow, dpr));
+  const [sx, sy] = f.toScreen((game.spot.x + game.spot.w / 2) * TILE, game.spot.y * TILE);
+  f.labels.push(() => scoreboard(g, game, sx, sy - 10 * dpr, serverNow, dpr));
 }
 
 function scoreboard(
@@ -150,14 +131,10 @@ function scoreboard(
   gameHits.push({ x, y, w, h, open: () => openMatch(game.id) });
 }
 
+const openArcade = () => hud.set({ panel: { kind: "arcade" } });
+
 /** "🎮 Hype Cycle 2/6 · 🪙 50" over the host of an open table: people passing by can join. */
-function drawSigns(
-  g: CanvasRenderingContext2D,
-  labels: (() => void)[],
-  toScreen: ToScreen,
-  now: number,
-  dpr: number,
-) {
+function drawSigns({ g, labels, toScreen, now, dpr }: Frame) {
   const lobby = hud.get().lobby;
   if (!lobby) return;
   for (const t of lobby.tables) {
@@ -171,7 +148,7 @@ function drawSigns(
     labels.push(() => {
       const y = sy - 30 * dpr;
       const { w, h } = pill(g, sx, y, text, dpr, "rgba(143, 227, 255, 0.95)", C.ink);
-      gameHits.push({ x: sx - w / 2, y: y - h, w, h, open: () => hud.set({ panel: { kind: "arcade" } }) });
+      gameHits.push({ x: sx - w / 2, y: y - h, w, h, open: openArcade });
     });
   }
 }

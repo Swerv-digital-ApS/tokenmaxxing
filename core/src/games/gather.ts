@@ -45,23 +45,24 @@ export function findSpot(
   others: Spot[],
   taken: ReadonlySet<string> = new Set(),
 ): { x: number; y: number } | null {
+  // Other games, with their tile of space.
+  const kept = others.map((o) => ({ x: o.x - 1, y: o.y - 1, w: o.w + 2, h: o.h + 2 }));
   const fits = (x: number, y: number) => {
     for (let j = 0; j < h; j++)
       for (let i = 0; i < w; i++) {
         const tx = x + i;
         const ty = y + j;
         if (!map.walkable(tx, ty) || taken.has(`${tx},${ty}`)) return false;
-        if (others.some((o) => inside({ x: o.x - 1, y: o.y - 1, w: o.w + 2, h: o.h + 2 }, tx, ty)))
-          return false;
+        if (kept.some((o) => inside(o, tx, ty))) return false;
       }
     return true;
   };
   const [fx, fy] = from;
-  // Rings of growing distance around `from`, centring the patch on it.
+  // Rings of growing distance around `from`, centring the patch on it: row by row, so the top and
+  // bottom rows whole and only the two ends of the rows between.
   for (let r = 0; r < Math.max(map.width, map.height); r++)
     for (let dy = -r; dy <= r; dy++)
-      for (let dx = -r; dx <= r; dx++) {
-        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      for (let dx = -r; dx <= r; dx += dy === -r || dy === r ? 1 : 2 * r) {
         const x = fx + dx - Math.floor(w / 2);
         const y = fy + dy - Math.floor(h / 2);
         if (fits(x, y)) return { x, y };

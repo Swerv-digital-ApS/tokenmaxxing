@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [main]
@@ -18,10 +19,34 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile --ignore-scripts
-      - run: bun run check
+      # Every actor call crosses loopback TCP between RivetKit's runner and its engine, and the
+      # runner doesn't set TCP_NODELAY (rivetkit 2.3.21), so each one waits ~40 ms on a delayed ACK.
+      # Quick ACKs on loopback cut the test run by about a third. Speed only: if the route
+      # can't be changed, the tests still pass.
+      - name: Quick ACKs on loopback
+        run: |
+          sudo ip route change local 127.0.0.0/8 dev lo proto kernel scope host src 127.0.0.1 quickack 1 &&
+          sudo ip route change local 127.0.0.1 dev lo proto kernel scope host src 127.0.0.1 quickack 1 ||
+          echo "::warning::couldn't turn on quick ACKs on loopback; the tests will be slower"
+      - run: bun run typecheck
+      - run: bun run lint
+      # `bun run test`'s 12 workers each start a server and an engine. On the runner, more than two at
+      # once stall the engines (an actor's creation or a room's events wait 30 s), so two here.
+      - run: bun test --timeout 60000 --parallel=2
 
   desktop:
-    runs-on: macos-15
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Preserve the existing macOS check name for branch protection.
+          - os: macos-15
+            name: desktop
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -35,10 +60,10 @@ jobs:
           workspaces: app/desktop/src-tauri
       - run: bun install --frozen-lockfile --ignore-scripts
       # Regenerates the protocol fixture from the TS types; the Rust side must decode it (cargo test).
-      - run: bun test app/helper/test/protocol.test.ts
+      - run: bun test app/helper/test/protocol.test.ts app/helper/test/platform-paths.test.ts
       - run: git diff --exit-code app/desktop/src-tauri/tests/fixtures
       # The build checks the sidecar exists.
-      - run: bash app/desktop/scripts/helper.sh
+      - run: bun app/desktop/scripts/helper.ts
       - working-directory: app/desktop/src-tauri
         run: |
           cargo fmt --check

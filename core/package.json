@@ -4,5 +4,9 @@
   "type": "module",
   "exports": {
     "./*": "./src/*"
+  },
+  "dependencies": {
+    "hanzio": "^3.3.0",
+    "llm-usage-extraction": "^0.3.0"
   }
 }

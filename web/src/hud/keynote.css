@@ -1,0 +1,80 @@
+/* The keynote watch party (Keynote.tsx): a banner while one is on, and the poster's panel. */
+.keynote-banner {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 16px 7px;
+  background: var(--panel);
+  border-radius: 10px;
+  border-top: 5px solid var(--accent);
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* Under the outage picnic's banner, when both are up. */
+.keynote-banner.below {
+  top: 74px;
+}
+
+.keynote-banner .link {
+  padding: 0;
+  text-decoration: none;
+}
+
+.keynote-banner strong {
+  font-size: 15px;
+  color: var(--text);
+}
+
+.keynote-banner a {
+  color: var(--accent);
+}
+
+.keynotes {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+}
+
+.keynotes li {
+  padding: 8px 12px;
+  border-left: 4px solid var(--accent);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.keynotes li + li {
+  margin-top: 8px;
+}
+
+.keynotes li.live {
+  background: rgba(232, 67, 75, 0.12);
+}
+
+.modal .keynotes h3 {
+  margin: 2px 0;
+  font-size: 16px;
+  text-transform: none;
+}
+
+.keynotes p {
+  margin: 0 0 4px;
+}
+
+.keynote-when {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.keynotes a {
+  color: var(--accent);
+  font-weight: 700;
+}

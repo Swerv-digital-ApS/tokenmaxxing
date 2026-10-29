@@ -1,5 +1,5 @@
 import { type MouseEvent, useState } from "react";
-import { errorText } from "../net.ts";
+import { errorText } from "../errors.ts";
 
 /** One click, straight to the chat. Emoji burst around you; lines show as a bubble. */
 const EMOJIS = ["🚀", "🔥", "🎉", "😂", "👏", "💸", "🤯", "☕", "🫡", "💯", "👀", "🦄"];

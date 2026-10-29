@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { frontier, plotId } from "@tokenmaxxing/core/maps.ts";
-import { admin, admit, as, client, event, signUp } from "./rivet.ts";
+import { admit, as, client, event, MIN, signUp } from "./rivet.ts";
 
 describe("accounts", () => {
   test("names are unique and validated", async () => {
@@ -15,7 +15,21 @@ describe("accounts", () => {
     await a.town.setLook({ style: 1, skin: 2, hair: 3, outfit: 4 });
     const me = await a.town.me();
     expect(me.name).toBe(`${a.name}x`);
-    expect(me.look).toEqual({ style: 1, skin: 2, hair: 3, outfit: 4, glasses: 0, hat: 0, pet: 0 });
+    expect(me.look).toEqual({
+      style: 1,
+      skin: 2,
+      hair: 3,
+      outfit: 4,
+      glasses: 0,
+      hat: 0,
+      pet: 0,
+      held: 0,
+      back: 0,
+      petwear: 0,
+      petVariant: 0,
+      merch: 0,
+      merchWorn: 0,
+    });
     await expect(a.town.setLook({ style: 99, skin: 0, hair: 0, outfit: 0 })).rejects.toThrow();
   });
 
@@ -26,6 +40,34 @@ describe("accounts", () => {
     expect(names.length).toBeGreaterThanOrEqual(2);
     expect(names.every((n) => n.startsWith("zsearch"))).toBe(true);
     expect(await a.town.searchNames("no spaces")).toEqual([]);
+  });
+
+  test("the card: a bio (five edits an hour, reportable) and a showcase of what you own", async () => {
+    const a = await signUp("bio");
+    const b = await signUp("bio");
+    expect(await a.town.setBio("  Ships\non Fridays ")).toBe("Ships on Fridays");
+    expect((await b.town.profile(a.userId, "7d")).bio).toBe("Ships on Fridays");
+    await expect(a.town.setBio("see acme.com")).rejects.toThrow("no links");
+    await expect(a.town.setBio("x".repeat(121))).rejects.toThrow("120");
+    // Reports: not your own, and once is once.
+    await expect(a.town.reportBio(a.userId)).rejects.toThrow("own");
+    await b.town.reportBio(a.userId);
+    await b.town.reportBio(a.userId);
+    // One edit so far (the bad ones weren't counted); four more fit, a sixth doesn't.
+    for (let i = 0; i < 4; i++) await a.town.setBio(`edit ${i}`);
+    await expect(a.town.setBio("one too many")).rejects.toThrow("Try again");
+    expect((await b.town.profile(a.userId, "7d")).bio).toBe("edit 3");
+    // Nothing earned yet: nothing to pin, and an unknown id is refused too.
+    await expect(a.town.setShowcase([{ id: "badge:shipper" }])).rejects.toThrow("earned");
+    await expect(a.town.setShowcase([{ id: "nope" }])).rejects.toThrow("earned");
+    await expect(a.town.setShowcase([{ id: "a" }, { id: "a" }])).rejects.toThrow();
+    await expect(a.town.setShowcase("badge:shipper")).rejects.toThrow();
+    expect(await a.town.setShowcase([])).toEqual([]);
+    expect((await a.town.profile(a.userId, "7d")).showcase).toEqual([]);
+    // The Tavern's plaque board is readable by anyone, empty to begin with, and only `world` writes it.
+    const board = await b.town.regulars();
+    expect(board.me).toBeNull();
+    await expect(b.town.tavernMinutes("2026-10-22", [[b.userId, 60, 1]])).rejects.toThrow();
   });
 
   test("everything but sign-up needs a token", async () => {
@@ -72,6 +114,28 @@ describe("companies", () => {
     const other = await mate.town.createCompany("Solo");
     expect((await owner.town.me()).company!.members).toHaveLength(1);
     expect(other.members.map((m) => m.name)).toEqual([mate.name]);
+  });
+
+  test("everyone leaving at once closes it in the world too", async () => {
+    // Enough of them that, pushed out of order, one closed company used to stay standing.
+    const company = async (i: number) => {
+      const owner = await signUp("lv");
+      const co = await owner.town.createCompany(`Leavers ${i}`);
+      const mates = [await signUp("lv"), await signUp("lv")];
+      for (const mate of mates) {
+        await mate.town.apply(co.id);
+        await owner.town.approve(mate.userId);
+      }
+      return { id: co.id, people: [owner, ...mates] };
+    };
+    // One at a time: sign-ups at once can time out creating their players on a busy CI runner.
+    const companies = [];
+    for (let i = 0; i < 15; i++) companies.push(await company(i));
+    const ids = companies.map((co) => co.id);
+    const people = companies.flatMap((co) => co.people);
+    await Promise.all(people.map((u) => u.town.leaveCompany()));
+    const town = await as(people[0]!.token).world.join();
+    expect(town.companies.filter((co) => ids.includes(co.id))).toEqual([]);
   });
 
   test("declining, withdrawing, and one application at a time", async () => {
@@ -205,44 +269,22 @@ describe("leaderboard", () => {
     expect(p.models[0]!.model).toBe("claude-haiku-4-5-20251001");
     expect(p.level).toBeGreaterThan(0);
   });
-});
 
-describe("coins and the shop", () => {
-  test("usage earns coins, square-rooted per day", async () => {
-    const a = await signUp("coin");
-    // 100M today: √100 = 10. 400M more the same day makes it √500 = 22, not 30. (A minute counts
-    // for at most 200M, so the 400M comes over the next two.)
-    const now = Date.now();
+  test("badges: founder for a company owner, big day after 3B tokens in one day", async () => {
+    const a = await signUp("badge");
+    await a.town.createCompany("Badge Co");
+    const ids = async () => (await a.town.profile(a.userId, "today")).badges.map((b) => b.id);
+    expect(await ids()).toEqual(["founder"]);
+    // A minute counts for at most 200M, so the 3B comes over fifteen, on an old day so it can't straddle midnight.
+    const day = Date.UTC(2023, 5, 14, 12);
     await as(a.token)
       .player(a.userId)
-      .ingest([event({ inputTokens: 100e6, timestamp: now })]);
-    expect((await a.town.wallet()).balance).toBe(10);
-    await as(a.token)
-      .player(a.userId)
-      .ingest([
-        event({ inputTokens: 200e6, timestamp: now + 60_000 }),
-        event({ inputTokens: 200e6, timestamp: now + 120_000 }),
-      ]);
-    expect((await a.town.wallet()).balance).toBe(22);
-    // Logs from before signing up (a first sync's backfill) pay nothing.
-    await as(a.token)
-      .player(a.userId)
-      .ingest([event({ inputTokens: 150e6, timestamp: Date.UTC(2023, 5, 14, 12) })]);
-    expect((await a.town.wallet()).balance).toBe(22);
-  });
-
-  test("buy, then wear; not before, not twice, not when short", async () => {
-    const a = await signUp("shop");
-    await expect(a.town.buy("glasses.1")).rejects.toThrow("coins");
-    await expect(a.town.setLook({ ...(await a.town.me()).look, glasses: 1 })).rejects.toThrow("shop");
-    await admin().adminSetCoins(a.userId, 100);
-    const before = await a.town.wallet();
-    const after = await a.town.buy("glasses.1");
-    expect(after.balance).toBe(before.balance - 60);
-    expect(after.owned).toEqual(["glasses.1"]);
-    await expect(a.town.buy("glasses.1")).rejects.toThrow("already");
-    await expect(a.town.buy("nope")).rejects.toThrow();
-    await a.town.setLook({ ...(await a.town.me()).look, glasses: 1 });
-    expect((await a.town.me()).look.glasses).toBe(1);
+      .ingest(
+        Array.from({ length: 15 }, (_, i) =>
+          event({ inputTokens: 200e6, outputTokens: 0, timestamp: day + i * MIN }),
+        ),
+      );
+    // The same 3B is also a billion tokens burnt over all days (the furnace).
+    expect(await ids()).toEqual(["bigday", "founder", "furnace"]);
   });
 });

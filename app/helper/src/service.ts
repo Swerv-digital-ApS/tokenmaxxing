@@ -1,6 +1,7 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { typedSwitch } from "hanzio";
 
 /**
  * Keeps `tokenmaxxing run` going on a linked computer: a LaunchAgent on macOS, a systemd user unit on
@@ -20,11 +21,15 @@ const PASSED_ENV = [
   "CLAUDE_CONFIG_DIR",
   "CODEX_HOME",
   "CURSOR_DATA_DIR",
-  "CURSOR_PROJECTS_DIR",
-  "TOKENMAXXING_CLAUDE_COWORK_DIR",
+  "CLAUDE_COWORK_DIR",
   "TOKENMAXXING_CLI_DIR",
+  "POSTHOG_DESKTOP_DIR",
   "XDG_CONFIG_HOME",
 ];
+
+/** `$XDG_CONFIG_HOME`, or `~/.config` without one. */
+export const configHome = (env: NodeJS.ProcessEnv = process.env): string =>
+  env.XDG_CONFIG_HOME || join(homedir(), ".config");
 
 export const serviceEnv = (env: NodeJS.ProcessEnv = process.env): Record<string, string> =>
   Object.fromEntries(PASSED_ENV.flatMap((k) => (env[k] ? [[k, env[k]]] : [])));
@@ -35,9 +40,9 @@ export function runCommand(): string[] {
   return compiled ? [process.execPath, "run"] : [process.execPath, Bun.main, "run"];
 }
 
-export const launchAgentPath = (home = homedir()) => join(home, "Library", "LaunchAgents", `${LABEL}.plist`);
+const launchAgentPath = () => join(homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
 
-export const macLogPath = (home = homedir()) => join(home, "Library", "Logs", "Tokenmaxxing", "cli.log");
+const macLogPath = () => join(homedir(), "Library", "Logs", "Tokenmaxxing", "cli.log");
 
 const xml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -81,8 +86,7 @@ ${vars}
 `;
 }
 
-export const systemdUnitPath = (env: NodeJS.ProcessEnv = process.env) =>
-  join(env.XDG_CONFIG_HOME || join(homedir(), ".config"), "systemd", "user", UNIT);
+const systemdUnitPath = () => join(configHome(), "systemd", "user", UNIT);
 
 /** systemd's own quoting: each word in double quotes, with `\`, `"`, `%` and `$` escaped. */
 const quote = (s: string) => `"${s.replace(/[\\"]/g, "\\$&").replace(/%/g, "%%").replace(/\$/g, "$$$$")}"`;
@@ -123,10 +127,17 @@ async function sh(cmd: string[]): Promise<{ ok: boolean; out: string }> {
 
 const gui = () => `gui/${process.getuid?.() ?? 0}`;
 
-export type ServiceResult = { ok: true; note?: string } | { ok: false; why: string };
+/**
+ * `launchctl` and `systemctl --user` reach this user's real service whatever `HOME` is, so tests and
+ * runs from source set `TOKENMAXXING_NO_SERVICE=1` to keep their hands off it.
+ */
+const noService = () => process.env.TOKENMAXXING_NO_SERVICE === "1";
+
+type ServiceResult = { ok: true; note?: string } | { ok: false; why: string };
 
 /** Installs and starts the service. Where there's no service manager, says how to run it instead. */
 export async function installService(): Promise<ServiceResult> {
+  if (noService()) return { ok: false, why: "TOKENMAXXING_NO_SERVICE is set" };
   const program = runCommand();
   const env = serviceEnv();
   if (process.platform === "darwin") {
@@ -158,6 +169,7 @@ export async function installService(): Promise<ServiceResult> {
 
 /** Stops and removes the service. `running` false: called from the service itself, which exits next. */
 export async function uninstallService(running = true): Promise<void> {
+  if (noService()) return;
   if (process.platform === "darwin") {
     if (running) await sh(["launchctl", "bootout", `${gui()}/${LABEL}`]);
     await rm(launchAgentPath(), { force: true });
@@ -170,6 +182,7 @@ export async function uninstallService(running = true): Promise<void> {
 
 /** Whether the service is running, as the service manager sees it; null where there's none. */
 export async function serviceRunning(): Promise<boolean | null> {
+  if (noService()) return null;
   if (process.platform === "darwin") {
     const r = await sh(["launchctl", "print", `${gui()}/${LABEL}`]);
     return r.ok && /state = running/.test(r.out);
@@ -181,7 +194,12 @@ export async function serviceRunning(): Promise<boolean | null> {
 
 /** Follows the service's log. */
 export function logsCommand(): string[] | null {
-  if (process.platform === "darwin") return ["tail", "-n", "50", "-F", macLogPath()];
-  if (process.platform === "linux") return ["journalctl", "--user", "-u", UNIT, "-n", "50", "-f"];
-  return null;
+  return typedSwitch(
+    process.platform,
+    {
+      darwin: () => ["tail", "-n", "50", "-F", macLogPath()],
+      linux: () => ["journalctl", "--user", "-u", UNIT, "-n", "50", "-f"],
+    },
+    () => null,
+  );
 }

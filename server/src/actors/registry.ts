@@ -1,4 +1,5 @@
 import { setup } from "rivetkit";
+import { logSlowActions } from "../slow-actions.ts";
 import { arcade } from "./arcade.ts";
 import { match } from "./match.ts";
 import { player } from "./player.ts";
@@ -16,12 +17,16 @@ export const ENGINE_PORT = Number(process.env.RIVET_RUN_ENGINE_PORT ?? 6420);
  */
 export const ENGINE_TOKEN = "default";
 
+const actors = { town, player, world, arcade, match };
+// In place, before `setup`: the registry's type stays the actors' own.
+for (const [name, definition] of Object.entries(actors)) logSlowActions(name, definition);
+
 /**
  * One process runs everything: RivetKit starts the engine on localhost and
  * `main.ts` exposes only the client gateway through its own server.
  */
 export const registry = setup({
-  use: { town, player, world, arcade, match },
+  use: actors,
   startEngine: true,
   token: ENGINE_TOKEN,
   engineHost: "127.0.0.1",
@@ -37,7 +42,8 @@ export const registry = setup({
   // there's never an old runner to drain. Bump this if actors ever run on more than one host.
   envoy: { version: 1 },
   // Railway waits a few seconds after SIGTERM; the default grace is the engine's 30 minutes.
-  shutdown: { gracePeriodMs: 5_000 },
+  // main.ts handles SIGINT/SIGTERM itself: after the drain it also stops the engine child.
+  shutdown: { gracePeriodMs: 5_000, disableSignalHandlers: true },
 });
 
 export type { DeviceInfo } from "./player.ts";
@@ -46,15 +52,22 @@ export type {
   AdminLogEntry,
   AdminOverview,
   AdminUser,
+  BagRow,
   BoardCompany,
   BoardPlayer,
+  Calendar,
+  Cart,
   CompanyProfile,
+  Copy,
   GamePlayer,
   Leaderboard,
   Listing,
   Me,
   MyCompany,
   Profile,
+  Raid,
   Today,
+  Trade,
   Wallet,
+  WalletLine,
 } from "./town.ts";

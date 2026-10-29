@@ -1,0 +1,81 @@
+/* The morning paper (Paper.tsx): a newsprint front page inside the usual modal. */
+.paper {
+  background: #f3ecdc;
+  color: var(--ink);
+  border-radius: 6px;
+  padding: 14px 16px 16px;
+  font-family: Georgia, "Times New Roman", serif;
+  box-shadow: inset 0 0 0 1px rgba(43, 36, 51, 0.15);
+}
+
+.paper-mast {
+  text-align: center;
+  border-bottom: 3px double var(--ink);
+  padding-bottom: 6px;
+  margin-bottom: 10px;
+}
+
+.modal .paper-mast h3 {
+  margin: 0;
+  color: var(--ink);
+  font:
+    700 30px / 1.1 "Old English Text MT",
+    "UnifrakturMaguntia",
+    Georgia,
+    serif;
+  letter-spacing: 0.5px;
+  text-transform: none;
+}
+
+.modal .paper-mast p {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 6px 0 0;
+  border-top: 1px solid var(--ink);
+  padding-top: 3px;
+  color: #5b4a44;
+  font: 600 10px / 1.3 var(--font);
+  text-transform: uppercase;
+}
+
+.paper h4,
+.paper h5 {
+  margin: 0 0 4px;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  text-transform: none;
+}
+
+.paper h4 {
+  font-size: 22px;
+  line-height: 1.15;
+}
+
+.paper h5 {
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.modal .paper p {
+  margin: 0;
+  color: #4a3f47;
+  font-style: italic;
+}
+
+.paper-lead {
+  border-bottom: 1px solid rgba(43, 36, 51, 0.35);
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+}
+
+.paper-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.paper-cols section + section {
+  border-left: 1px solid rgba(43, 36, 51, 0.25);
+  padding-left: 12px;
+}

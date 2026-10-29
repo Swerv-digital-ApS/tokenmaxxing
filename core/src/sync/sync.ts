@@ -1,21 +1,21 @@
+import { chunkArray } from "hanzio";
 import { type IngestResponse, SOURCES, type SyncState, type TokenEvent } from "../types.ts";
 import { type CollectOptions, collect } from "./collect.ts";
 import { saveState } from "./state.ts";
 
 /** Every source is read unless `enabled` narrows it (tests); `githubAccounts: null` skips GitHub. */
-interface SyncOptions
-  extends Partial<
-    Pick<
-      CollectOptions,
-      | "enabled"
-      | "githubAccounts"
-      | "githubFetch"
-      | "now"
-      | "cursorDbPath"
-      | "cursorFetch"
-      | "cursorCredentials"
-    >
-  > {
+interface SyncOptions extends Partial<
+  Pick<
+    CollectOptions,
+    | "enabled"
+    | "githubAccounts"
+    | "githubFetch"
+    | "now"
+    | "cursorDbPath"
+    | "cursorFetch"
+    | "cursorCredentials"
+  >
+> {
   statePath: string;
   send: (events: TokenEvent[]) => Promise<IngestResponse>;
   onError?: (err: unknown, where: string) => void;
@@ -28,7 +28,7 @@ interface SyncResult {
 }
 
 /** Server rejects bodies above this; batches are split to fit. */
-export const MAX_EVENTS_PER_REQUEST = 1000;
+const MAX_EVENTS_PER_REQUEST = 1000;
 
 /**
  * Read new events and send them. State is saved after every acked batch, so
@@ -58,8 +58,8 @@ export async function sync(state: SyncState, opts: SyncOptions): Promise<SyncRes
     githubFetch,
     ...(githubAccounts !== undefined ? { githubAccounts } : {}),
   })) {
-    for (let i = 0; i < batch.events.length; i += MAX_EVENTS_PER_REQUEST) {
-      const r = await opts.send(batch.events.slice(i, i + MAX_EVENTS_PER_REQUEST));
+    for (const events of chunkArray(batch.events, MAX_EVENTS_PER_REQUEST)) {
+      const r = await opts.send(events);
       inserted += r.inserted;
     }
     sent += batch.events.length;

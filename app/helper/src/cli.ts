@@ -6,14 +6,20 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { compact } from "@tokenmaxxing/core/format.ts";
 import type { Message } from "@tokenmaxxing/core/protocol.ts";
-import type { registry } from "@tokenmaxxing/server/registry";
-import { createClient } from "rivetkit/client";
+import { getErrorMessage } from "hanzio";
 import pkg from "../../../package.json" with { type: "json" };
-import { Helper } from "./helper.ts";
-import { installService, logsCommand, runCommand, serviceRunning, uninstallService } from "./service.ts";
+import { APP_STATE_FILE, appStateDir, clientFor, errorCode, Helper } from "./helper.ts";
+import {
+  configHome,
+  installService,
+  logsCommand,
+  runCommand,
+  serviceRunning,
+  uninstallService,
+} from "./service.ts";
 
 /**
- * `tokenmaxxing`: sync a second computer's usage into your account (WORKHORSE.md). The app on your
+ * `tokenmaxxing`: sync a second computer's usage into your account (ARCHITECTURE.md, "Linked computers"). The app on your
  * main Mac makes a link code; `link` trades it for this computer's own token, which can only sync.
  */
 
@@ -45,13 +51,13 @@ const configDir = (): string =>
   process.env.TOKENMAXXING_CLI_DIR ||
   (process.platform === "darwin"
     ? join(homedir(), "Library", "Application Support", "Tokenmaxxing CLI")
-    : join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "tokenmaxxing"));
+    : join(configHome(), "tokenmaxxing"));
 
 const configPath = () => join(configDir(), "config.json");
 const statePath = () => join(configDir(), "state.json");
 
 /** The desktop app's sync state: if it's there, the app already sends this Mac's usage. */
-const appStatePath = () => join(homedir(), "Library", "Application Support", "Tokenmaxxing", "state.v2.json");
+const appStatePath = () => join(appStateDir(), APP_STATE_FILE);
 
 async function loadConfig(): Promise<Config | null> {
   try {
@@ -74,20 +80,18 @@ async function saveConfig(c: Config): Promise<void> {
   await chmod(configPath(), 0o600);
 }
 
-const forget = () => rm(configDir(), { recursive: true, force: true });
-
-const clientFor = (server: string) =>
-  createClient<typeof registry>({
-    endpoint: `${server.replace(/\/+$/, "")}/api/rivet`,
-    devtools: false,
-    disableMetadataLookup: true,
-  });
+// The state file first: a helper signing out removes it at the same moment, and Bun's recursive rm
+// quietly leaves the rest of the directory behind when a file vanishes under it.
+const forget = async () => {
+  await rm(statePath(), { force: true });
+  await rm(configDir(), { recursive: true, force: true });
+};
 
 /** A server error's message for people, or a plain one for the network. */
 function reason(err: unknown): string {
-  const e = err as { code?: unknown; message?: unknown } | null;
-  return typeof e?.code === "string" && e.code !== "internal_error" && typeof e.message === "string"
-    ? e.message
+  const message = (err as { message?: unknown } | null)?.message;
+  return errorCode(err) !== null && typeof message === "string"
+    ? message
     : "Can't reach the server. Check the connection and try again.";
 }
 
@@ -122,8 +126,8 @@ async function link(code: string | undefined, opts: { name?: string; server?: st
   if (!server) throw new Fail("Which server? Pass --server <url>, or use the install command from the app.");
   const existing = await loadConfig();
   if (existing) throw new Fail(`Already linked as "${existing.name}". Run tokenmaxxing unlink first.`);
-  if (process.platform === "darwin" && existsSync(appStatePath()))
-    throw new Fail("The Tokenmaxxing app already sends this Mac's usage, so there's nothing to link.");
+  if (existsSync(appStatePath()))
+    throw new Fail("The Tokenmaxxing app already sends this computer's usage, so there's nothing to link.");
 
   const name = (opts.name ?? hostname().replace(/\.local$/, "")).trim();
   const linked = await clientFor(server)
@@ -288,6 +292,6 @@ try {
   await main(process.argv.slice(2));
   process.exit(0);
 } catch (err) {
-  console.error(err instanceof Fail ? err.message : err instanceof Error ? err.message : String(err));
+  console.error(getErrorMessage(err));
   process.exit(1);
 }

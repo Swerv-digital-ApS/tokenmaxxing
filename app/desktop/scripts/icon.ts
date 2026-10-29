@@ -195,7 +195,7 @@ function png(rgba: Uint8Array, size: number): Buffer {
 function svg(grid: Grid): string {
   const rects: string[] = [];
   grid.forEach((row, y) => {
-    for (let x = 0; x < N; ) {
+    for (let x = 0; x < N;) {
       const c = row[x];
       let end = x + 1;
       while (end < N && row[end] === c) end++;

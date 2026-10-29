@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { SprView } from "@tokenmaxxing/core/games/spr.ts";
 import type { Snapshot } from "@tokenmaxxing/core/world.ts";
 import { as, eventually, rich } from "./rivet.ts";
 
@@ -6,11 +7,12 @@ type Rich = Awaited<ReturnType<typeof rich>>;
 const balance = async (u: Rich) => (await u.town.wallet()).balance;
 const pick = (u: Rich, id: number, p: string) => u.match(id).move({ pick: p });
 
-/** Both pick, then wait out the 2-second reveal. */
+/** Both pick, then wait out the 2-second reveal (picks are refused until it ends). */
 async function round(a: Rich, b: Rich, id: number, pa: string, pb: string) {
   await pick(a, id, pa);
   await pick(b, id, pb);
-  await Bun.sleep(2_100);
+  const { revealUntil } = (await a.match(id).frame()).view as SprView;
+  await Bun.sleep(Math.max(0, (revealUntil ?? 0) - Date.now()) + 10);
 }
 
 async function townGames(u: Rich) {
@@ -24,6 +26,9 @@ describe("the arcade", () => {
   test("invite → accept → play → the winner takes the pot; players gather in town and go back", async () => {
     const ada = await rich("ada");
     const bo = await rich("bo");
+    // Looks at the town for us: if ada joined to look, her disconnect could land after the game ends
+    // and move her "where she was" spot to her seat, and Back would take her there instead of the Inn.
+    const eve = await rich("eve");
     const [a0, b0] = [await balance(ada), await balance(bo)];
     const lobby = await ada.arcade.open("spr", { stake: 40, open: false, invite: [bo.userId] });
     const tableId = lobby.me.table!;
@@ -37,7 +42,7 @@ describe("the arcade", () => {
     expect(started.me.match).toBe(tableId);
     expect(started.tables.some((t) => t.id === tableId)).toBe(false);
     // Both gathered at a table in town, as `playing`.
-    const games = await townGames(ada);
+    const games = await townGames(eve);
     const g = games.find((x) => x.id === tableId)!;
     expect(g.players.sort()).toEqual([ada.userId, bo.userId].sort());
     await expect(as(ada.token).world.step("up")).resolves.toMatchObject({ state: "playing" });
@@ -49,7 +54,7 @@ describe("the arcade", () => {
     await eventually(async () => {
       expect(await balance(ada)).toBe(a0 + 40);
       expect(await balance(bo)).toBe(b0 - 40);
-      expect((await townGames(ada)).some((x) => x.id === tableId)).toBe(false);
+      expect((await townGames(eve)).some((x) => x.id === tableId)).toBe(false);
     });
     const frame = await ada.match(tableId).frame();
     expect(frame.info.outcome).toEqual({ places: [[ada.userId], [bo.userId]] });

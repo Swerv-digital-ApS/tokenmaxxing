@@ -3,10 +3,17 @@
  * `BOTS`; the `world` actor walks it and makes it talk. Ids are negative, so they never meet a real
  * user's (those start at 1).
  */
-import { compact } from "./format.ts";
+import { lerp } from "hanzio";
+import { BARKEEP } from "./barkeep.ts";
+import { COP } from "./cop.ts";
+import { BOT_LEVEL, compact, fill } from "./format.ts";
+import { CHEERS } from "./keynote.ts";
 import type { GameMap } from "./maps.ts";
 import { worldClock } from "./range.ts";
-import { type Facing, type Look, route } from "./world.ts";
+import { SHOPKEEPERS } from "./shopkeepers.ts";
+import type { WeatherKind } from "./sky.ts";
+import { specialOn, TAVERN } from "./tavern.ts";
+import { type Facing, type Look, lookWith, type Place, route } from "./world.ts";
 
 export interface BotDef {
   /** Negative and unique. */
@@ -19,7 +26,7 @@ export interface BotDef {
   /** Said at random, one every `every[0]` to `every[1]` ms while someone is around to hear it. */
   lines: string[];
   every: [number, number];
-  /** The chance it follows someone online in town after a walk, instead of wandering. Default 0.3. */
+  /** The chance it follows someone online in town after a walk, instead of wandering. Default 0.08. */
   followChance?: number;
   /** Said to whoever it's following: `{name}` is their name, `{tokens}` their tokens today. */
   followLines?: string[];
@@ -27,10 +34,30 @@ export interface BotDef {
   coffeeLines?: string[];
   /** Lines for certain times, said instead of `lines` half the time while they apply. */
   moments?: Moment[];
+  /** Where it's placed on wake, instead of the town square. */
+  home?: Place;
+  /** It never walks or follows anyone (the barkeep stands behind his bar). */
+  still?: true;
+  /** For the weather over Copenhagen; one is said now and then while it lasts. */
+  weatherLines?: Partial<Record<WeatherKind, string[]>>;
+  /** For an empty room, or a busy one (`BUSY_CROWD` or more). */
+  crowdLines?: { empty?: string[]; busy?: string[] };
+  /** About the day's special: `{special}` is its line on the chalkboard. */
+  specialLines?: string[];
+  /**
+   * About the keynote watch party (`keynote.ts`): `soon` before it (`{title}`, `{when}`), `live` while it's on
+   * the screen. Without `live`, a bot watching it shouts `CHEERS`.
+   */
+  keynoteLines?: { soon?: string[]; live?: string[] };
 }
 
+/** From this many people in the room, it's busy. */
+export const BUSY_CROWD = 5;
+/** Up to this many, it's empty: a bot only talks to a room with someone in it, so that someone is the one. */
+export const EMPTY_CROWD = 1;
+
 /** A time on the world's clock (Copenhagen): on `days` (0 is Sunday; all if left out), hours `from` to `to`. */
-export interface Moment {
+interface Moment {
   days?: number[];
   from?: number;
   to?: number;
@@ -38,13 +65,12 @@ export interface Moment {
 }
 
 const WEEKDAYS = [1, 2, 3, 4, 5];
-
 export const BOTS: BotDef[] = [
   {
     id: -1,
     name: "Seb - AROX",
-    look: { style: 1, skin: 0, hair: 2, outfit: 5, glasses: 1, hat: 0, pet: 0 },
-    level: 99,
+    look: lookWith({ style: 1, skin: 0, hair: 2, outfit: 5, glasses: 1, held: 7, back: 6 }),
+    level: BOT_LEVEL,
     bio: "Står bag Arox (arox.dk): grips, sjippetove og knee sleeves til CrossFit. Har set verdens undergang komme siden første ordre. Pakker stadig ordrer kl. 22.",
     lines: [
       "Verden går under, og folk spørger stadig, om grips kan fås i pink.",
@@ -143,8 +169,8 @@ export const BOTS: BotDef[] = [
   {
     id: -2,
     name: "Jesper Buch",
-    look: { style: 0, skin: 0, hair: 1, outfit: 9, glasses: 2, hat: 0, pet: 0 },
-    level: 100,
+    look: lookWith({ style: 0, skin: 0, hair: 1, outfit: 9, glasses: 2, held: 3 }),
+    level: BOT_LEVEL,
     bio: "Investor. Startede Just Eat i en kælder i Kolding. Går rundt i byen og sørger for, at ingen hviler sig. Han er ikke mr. Nice Guy.",
     lines: [
       "Jeg startede Just Eat i en kælder i Kolding. Hvad er din undskyldning?",
@@ -169,7 +195,6 @@ export const BOTS: BotDef[] = [
       "💰🔥💰",
     ],
     every: [40_000, 120_000],
-    followChance: 0.6,
     followLines: [
       "@{name} kun {tokens} tokens i dag? Det er ikke en investering værd.",
       "@{name} {tokens} tokens. Fint. Gør det dobbelt i morgen.",
@@ -222,13 +247,16 @@ export const BOTS: BotDef[] = [
       },
     ],
   },
+  COP,
+  ...(TAVERN ? [BARKEEP] : []),
+  ...SHOPKEEPERS,
 ];
 
 export const isBot = (id: number): boolean => id < 0;
 
 /** Uniformly between `min` and `max`. */
 export const between = ([min, max]: readonly [number, number], rand = Math.random): number =>
-  min + (max - min) * rand();
+  lerp(min, max, rand());
 
 export const pick = <T>(list: readonly T[], rand = Math.random): T => list[Math.floor(rand() * list.length)]!;
 
@@ -262,37 +290,57 @@ export function toCoffee(map: GameMap, x: number, y: number): { path: Facing[]; 
 }
 
 /** What the bot is up to, for picking what it says. */
-export interface Context {
+interface Context {
   /** Who it's following. */
   leader?: { name: string; todayTokens: number } | null;
   /** Cups in its system, after a trip to the coffee machine. */
   cups?: number;
+  /** Real people in the bot's room, and the weather outside: for the barkeep's small talk. */
+  crowd?: number;
+  weather?: WeatherKind;
+  /** A keynote on the Tavern's screen (`live`), or the next one coming: for the watch party. */
+  keynote?: { title: string; when: string; live: boolean };
 }
 
 /**
  * What `bot` says at `at`: about the coffee it just had, to whoever it's following (most of the
- * time), something for the time of day (half the time), or anything.
+ * time), the room, weather or special (a third), something for the time of day (half), or anything.
  */
 export function lineFor(bot: BotDef, at: number, ctx: Context = {}, rand = Math.random): string {
-  const fill = (line: string) =>
-    line
-      .replaceAll("{name}", ctx.leader?.name ?? "")
-      .replaceAll("{tokens}", compact(ctx.leader?.todayTokens ?? 0))
-      .replaceAll("{cups}", String(ctx.cups ?? 0));
-  if (ctx.cups && bot.coffeeLines?.length) return fill(pick(bot.coffeeLines, rand));
+  const say = (line: string) =>
+    fill(line, {
+      name: ctx.leader?.name ?? "",
+      tokens: compact(ctx.leader?.todayTokens ?? 0),
+      cups: ctx.cups ?? 0,
+      special: specialOn(new Date(at)),
+      title: ctx.keynote?.title ?? "",
+      when: ctx.keynote?.when ?? "",
+    });
+  if (ctx.cups && bot.coffeeLines?.length) return say(pick(bot.coffeeLines, rand));
+  // Watching a keynote, most of what anyone says is at the screen.
+  if (ctx.keynote?.live && rand() < 0.7) return say(pick(bot.keynoteLines?.live ?? CHEERS, rand));
   // "0 tokens i dag? Gå hjem." doesn't land: skip token lines for someone with none.
   const toLeader = (bot.followLines ?? []).filter((l) => ctx.leader?.todayTokens || !l.includes("{tokens}"));
-  if (ctx.leader && toLeader.length && rand() < 0.6) return fill(pick(toLeader, rand));
+  if (ctx.leader && toLeader.length && rand() < 0.6) return say(pick(toLeader, rand));
+  // The room, the weather and the day's special: a third of the time they apply.
+  const room = [
+    ...(ctx.crowd !== undefined && ctx.crowd <= EMPTY_CROWD ? (bot.crowdLines?.empty ?? []) : []),
+    ...((ctx.crowd ?? 0) >= BUSY_CROWD ? (bot.crowdLines?.busy ?? []) : []),
+    ...(ctx.weather ? (bot.weatherLines?.[ctx.weather] ?? []) : []),
+    ...(bot.specialLines ?? []),
+    ...(ctx.keynote && !ctx.keynote.live ? (bot.keynoteLines?.soon ?? []) : []),
+  ];
+  if (room.length && rand() < 0.35) return say(pick(room, rand));
   const { day, hour } = worldClock(at);
   const now = (bot.moments ?? []).filter(
     (m) => (!m.days || m.days.includes(day)) && hour >= (m.from ?? 0) && hour < (m.to ?? 24),
   );
   if (now.length && rand() < 0.5)
-    return fill(
+    return say(
       pick(
         now.flatMap((m) => m.lines),
         rand,
       ),
     );
-  return fill(pick(bot.lines, rand));
+  return say(pick(bot.lines, rand));
 }

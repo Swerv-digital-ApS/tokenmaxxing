@@ -1,12 +1,10 @@
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Command, Message } from "@tokenmaxxing/core/protocol.ts";
-import { Helper } from "./helper.ts";
+import { safeJsonParse } from "hanzio";
+import { APP_STATE_FILE, appStateDir, Helper } from "./helper.ts";
 
-const stateDir =
-  process.env.TOKENMAXXING_STATE_DIR ?? join(homedir(), "Library", "Application Support", "Tokenmaxxing");
-// v2: the world started from a fresh server, so every Mac re-reads its full history into it.
-const statePath = join(stateDir, "state.v2.json");
+const stateDir = process.env.TOKENMAXXING_STATE_DIR ?? appStateDir();
+const statePath = join(stateDir, APP_STATE_FILE);
 
 /** stdout carries protocol messages only; everything else goes to stderr. */
 const write = (msg: Message) => process.stdout.write(`${JSON.stringify(msg)}\n`);
@@ -43,14 +41,12 @@ async function serve(): Promise<void> {
   for await (const raw of console) {
     const line = raw.trim();
     if (!line) continue;
-    let cmd: Command;
-    try {
-      cmd = JSON.parse(line) as Command;
-    } catch {
+    const cmd = safeJsonParse<Command>(line);
+    if (!cmd.ok) {
       console.error("ignoring malformed command line");
       continue;
     }
-    void helper.handle(cmd);
+    void helper.handle(cmd.data);
   }
   // stdin closed: the shell quit or crashed. Exit instead of running orphaned.
   helper.stop();

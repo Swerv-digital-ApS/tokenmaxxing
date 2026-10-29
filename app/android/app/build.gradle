@@ -1,0 +1,37 @@
+plugins { id 'com.android.application' }
+
+def server = providers.gradleProperty('serverUrl').orElse('https://tokenmaxxing.dk').get()
+def origin = new URI(server)
+if (origin.scheme != 'https' || !origin.host || origin.userInfo || origin.query || origin.fragment || !(origin.path in ['', '/'])) {
+    throw new GradleException('serverUrl must be an HTTPS origin, such as https://tokenmaxxing.dk')
+}
+server = server.replaceAll('/+$', '')
+
+android {
+    namespace 'dk.hanskristoffer.tokenmaxxing.companion'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'dk.hanskristoffer.tokenmaxxing.companion'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '0.1.0'
+        buildConfigField 'String', 'SERVER_URL', '"' + server + '"'
+    }
+    buildTypes {
+        debug { applicationIdSuffix '.debug'; versionNameSuffix '-preview' }
+        release { minifyEnabled false }
+    }
+    buildFeatures { buildConfig true }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    lint { abortOnError true }
+}
+
+dependencies {
+    implementation 'androidx.activity:activity:1.10.1'
+    implementation 'com.google.android.gms:play-services-code-scanner:16.1.0'
+    testImplementation 'junit:junit:4.13.2'
+}

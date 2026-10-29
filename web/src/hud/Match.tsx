@@ -2,6 +2,7 @@ import { secondsUntil } from "@tokenmaxxing/core/format.ts";
 import { gameOf } from "@tokenmaxxing/core/games/index.ts";
 import { MAX_SIDE_BET, MAX_STAKE, odds, potShares, SPLITS } from "@tokenmaxxing/core/games/payouts.ts";
 import type { Frame, MatchInfo } from "@tokenmaxxing/core/games/wire.ts";
+import { sumBy } from "hanzio";
 import { useEffect, useState } from "react";
 import { lookOf } from "../game/world.ts";
 import { COMPONENTS } from "../games/index.ts";
@@ -17,7 +18,7 @@ export function MatchPanel({ id }: { id: number }) {
   const frame = useHud((s) => s.frame);
   const skew = useHud((s) => s.clockSkew);
   const { error, run } = useRun();
-  useTicker(250);
+  useTicker(250, !frame?.info.outcome);
   useEffect(() => () => closeMatch(), []);
   if (!frame || frame.info.id !== id)
     return (
@@ -153,7 +154,7 @@ function Result({ frame, run }: { frame: Frame; run: Run }) {
           <li key={i}>
             {medals[i] ?? `${i + 1}.`} {group.map(name).join(" & ")}
             {group.map((id) => shares.get(id) ?? 0).some((n) => n > 0) && (
-              <strong> +🪙 {group.map((id) => shares.get(id) ?? 0).reduce((a, b) => a + b, 0)}</strong>
+              <strong> +🪙 {sumBy(group, (id) => shares.get(id))}</strong>
             )}
           </li>
         ))}

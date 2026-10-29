@@ -2,14 +2,10 @@
  * SHA-256 of a string, synchronously, so game rules stay pure (Web Crypto is async).
  * Hype Cycle shows each round's hash up front and its seed after, so anyone can check.
  */
-const K = Uint32Array.from(
-  Array.from({ length: 64 }, (_, i) => {
-    // The first 32 bits of the fractional parts of the cube roots of the first 64 primes.
-    const primes: number[] = [];
-    for (let n = 2; primes.length < 64; n++) if (primes.every((p) => n % p)) primes.push(n);
-    return ((Math.cbrt(primes[i]!) % 1) * 2 ** 32) >>> 0;
-  }),
-);
+const PRIMES: number[] = [];
+for (let n = 2; PRIMES.length < 64; n++) if (PRIMES.every((p) => n % p)) PRIMES.push(n);
+/** The first 32 bits of the fractional parts of the cube roots of the first 64 primes. */
+const K = Uint32Array.from(PRIMES, (p) => ((Math.cbrt(p) % 1) * 2 ** 32) >>> 0);
 
 export function sha256(text: string): string {
   const bytes = [...new TextEncoder().encode(text)];

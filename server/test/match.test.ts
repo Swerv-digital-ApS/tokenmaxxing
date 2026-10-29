@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, jest, test } from "bun:test";
 import { createRequire } from "node:module";
 import { type TokenmaxxingState, tokenmaxxing } from "@tokenmaxxing/core/games/tokenmaxxing.ts";
 import type { Frame } from "@tokenmaxxing/core/games/wire.ts";
@@ -113,13 +113,18 @@ test("unchanged usage and ticks do not rewrite or broadcast a match", async () =
   expect(b.statusUpdates()).toBe(0);
   expect(b.frames).toEqual([]);
   const run = match.config.run as (c: Context) => Promise<void>;
+  // A tick on fake timers, instead of waiting out its second: it's over once the loop waits for the next.
+  jest.useFakeTimers();
   const running = run(b.ctx);
   try {
-    await Bun.sleep(1_100);
+    jest.advanceTimersToNextTimer();
+    for (let i = 0; jest.getTimerCount() === 0 && i < 1_000; i++) await Promise.resolve();
+    if (jest.getTimerCount() === 0) throw new Error("the tick didn't finish");
     expect(b.writes()).toBe(0);
     expect(b.statusUpdates()).toBe(0);
   } finally {
     b.controller.abort();
+    jest.useRealTimers();
     await running;
   }
 });
@@ -135,4 +140,18 @@ test("a usage query finishing after a forfeit does not restore that player's sco
   expect(await usage).toMatchObject({ tokens: 0, place: null });
   expect(b.state.state.forfeited).toContain(1);
   expect(b.state.state.tokens[1]).toBe(0);
+});
+
+test("match chat stores plain lines, so each new line doesn't make the state slower to read", async () => {
+  const b = battle();
+  const user = {
+    ...b.ctx,
+    conn: { state: { kind: "user", userId: 1 } },
+    vars: { chat: { take: () => true } },
+  } as unknown as Context;
+  for (let i = 1; i <= 50; i++) await actions.say(user, `line ${i}`);
+  // Spreading the live array stored the old lines as proxies, one layer deeper with every line.
+  const stored = structuredClone((onChange.target(b.state) as { chat?: unknown[] }).chat!);
+  expect(stored).toHaveLength(50);
+  expect(stored.at(-1)).toMatchObject({ id: 50, userId: 1, name: "p1", text: "line 50" });
 });

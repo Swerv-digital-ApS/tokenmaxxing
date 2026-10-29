@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { createClient } from "rivetkit/client";
+import type { registry as Registry } from "../src/actors/registry.ts";
 import { sha256 } from "../src/crypto.ts";
 import { admin, as, client, event, from, origin, signUp } from "./rivet.ts";
+
+// The gateway's and /install.sh's tests are here too, so `bun test --parallel` (a server for each
+// file) doesn't start one for a few requests.
 
 describe("nobody outside makes actors", () => {
   test("a stranger can't claim the next account by making its player first", async () => {
@@ -107,7 +112,42 @@ describe("pages", () => {
   });
 
   test("the page files aren't served without those headers", async () => {
-    for (const path of ["/index.html", "/admin.html"])
-      expect((await fetch(`${origin}${path}`)).status).not.toBe(200);
+    expect((await fetch(`${origin}/admin.html`)).status).not.toBe(200);
+    // With `site/dist` built, `/index.html` is the marketing site's; it mustn't be the game's.
+    const game = await (await fetch(`${origin}/play`)).text();
+    const index = await fetch(`${origin}/index.html`);
+    if (index.status === 200) expect(await index.text()).not.toBe(game);
+  });
+});
+
+// Browsers and the app reach the server by its public name, so RivetKit's client doesn't add the
+// engine's token the way it does for localhost. `token: ""` makes this client do the same.
+const remote = createClient<typeof Registry>({ endpoint: `${origin}/api/rivet`, token: "" });
+
+describe("the gateway, as a remote client reaches it", () => {
+  test("HTTP actions get past the engine to our actors", async () => {
+    await expect(remote.town.getOrCreate(["main"]).me()).rejects.toThrow("Sign in from the menu bar app.");
+    const user = await signUp("remote");
+    const me = await remote.town.getOrCreate(["main"], { params: { token: user.token } }).me();
+    expect(me.name).toBe(user.name);
+  });
+
+  test("WebSocket connections get through too", async () => {
+    const user = await signUp("remotews");
+    const conn = remote.world.getOrCreate(["main"], { params: { token: user.token } }).connect();
+    const snapshot = await conn.join();
+    expect(snapshot.selfId).toBe(user.userId);
+    await conn.dispose();
+  });
+});
+
+describe("/install.sh", () => {
+  test("points the CLI at the server it came from", async () => {
+    const r = await fetch(`${origin}/install.sh`);
+    expect(r.headers.get("content-type")).toContain("shellscript");
+    const script = await r.text();
+    expect(script).toStartWith("#!/bin/sh");
+    expect(script).toContain(`SERVER="${origin}"`);
+    expect(script).not.toContain("__SERVER__");
   });
 });

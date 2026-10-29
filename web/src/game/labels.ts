@@ -1,6 +1,12 @@
-import type { Peek } from "@tokenmaxxing/core/world.ts";
+import { SNEEZE_MS } from "@tokenmaxxing/core/sky.ts";
+import { type Peek, TILE } from "@tokenmaxxing/core/world.ts";
+import { clamp, sumBy } from "hanzio";
 import { C } from "../art/palette.ts";
+import { camera } from "./camera.ts";
+import { SNEEZE_TEXT, sneezeOf } from "./cold.ts";
 import { BURST_MS } from "./emoji.ts";
+import { hover, hoverStrength, labelAlpha } from "./near.ts";
+import { polseTag } from "./street.ts";
 import { type Avatar, gameTag, world } from "./world.ts";
 
 /** Name chips under house signs this frame, in canvas (device) pixels. */
@@ -11,19 +17,74 @@ export const signHits: { x: number; y: number; w: number; h: number; id: number 
 /** At most this many names show under a house's sign; the rest are a "+N". */
 const CHIPS_MAX = 4;
 
+export const FONT = "ui-monospace, SFMono-Regular, Menlo, monospace";
+
+/** Where the labels over things are judged from this frame: the player's tile (NaN: all show) and the hover's reveal. */
+const focus = { x: NaN, y: NaN, hover: 0 };
+
+/** Once a frame, before any label: who the labels are near to (`null`, or `all`, shows every one). */
+export function focusLabels(me: { x: number; y: number } | null, all: boolean, now: number): void {
+  focus.x = all || !me ? NaN : me.x + 0.5;
+  focus.y = all || !me ? NaN : me.y + 0.5;
+  focus.hover = hoverStrength(now);
+}
+
+/** A label's alpha for its spot on screen (canvas pixels): fainter the farther away the player is, unless hovered. */
+export function alphaAt(sx: number, sy: number): number {
+  if (Number.isNaN(focus.x)) return 1;
+  const tx = (sx / camera.scale + camera.x) / TILE;
+  const ty = (sy / camera.scale + camera.y) / TILE;
+  const dist = Math.hypot(tx - focus.x, ty - focus.y);
+  return labelAlpha(dist, Math.hypot(tx - hover.x - 0.5, ty - hover.y - 0.5), focus.hover);
+}
+
+/** The labels' fonts at `dpr`, made once rather than for every label (dpr only changes with the screen). */
+const fonts = { dpr: 0, pill: "", chip: "", pet: "", bubble: "" };
+function fontsAt(dpr: number) {
+  if (fonts.dpr !== dpr)
+    Object.assign(fonts, {
+      dpr,
+      pill: `600 ${11 * dpr}px ${FONT}`,
+      chip: `600 ${10 * dpr}px ${FONT}`,
+      pet: `600 ${9 * dpr}px ${FONT}`,
+      bubble: `500 ${12 * dpr}px ${FONT}`,
+    });
+  return fonts;
+}
+
+/** A house's row of chips: texts and widths, measured once per list (`world.houses` is replaced, never edited). */
+const chipRows = new WeakMap<Peek[], { dpr: number; texts: string[]; widths: number[]; w: number }>();
+function chipRow(g: CanvasRenderingContext2D, people: Peek[], dpr: number) {
+  const hit = chipRows.get(people);
+  if (hit?.dpr === dpr) return hit;
+  g.font = fontsAt(dpr).chip;
+  const texts = people
+    .slice(0, CHIPS_MAX)
+    .map((p) => `${p.state === "away" ? "💤 " : p.state === "working" ? "💻 " : ""}${p.name} Lv${p.level}`);
+  if (people.length > CHIPS_MAX) texts.push(`+${people.length - CHIPS_MAX}`);
+  const pad = 5 * dpr;
+  const gap = 3 * dpr;
+  const widths = texts.map((t) => g.measureText(t).width + pad * 2);
+  const row = { dpr, texts, widths, w: sumBy(widths, (w) => w) + gap * (widths.length - 1) };
+  chipRows.set(people, row);
+  return row;
+}
+
+/** How wide a house's row of chips is, in canvas pixels. */
+export const chipsWidth = (g: CanvasRenderingContext2D, people: Peek[], dpr: number): number =>
+  chipRow(g, people, dpr).w;
+
 /** One row of `💤 name Lv5` chips centred under a house's sign; clicking one opens their card. */
 export function chips(g: CanvasRenderingContext2D, cx: number, y: number, people: Peek[], dpr: number): void {
-  g.font = `600 ${10 * dpr}px ${FONT}`;
-  const shown = people.slice(0, CHIPS_MAX);
-  const texts = shown.map(
-    (p) => `${p.state === "away" ? "💤 " : p.state === "working" ? "💻 " : ""}${p.name} Lv${p.level}`,
-  );
-  if (people.length > shown.length) texts.push(`+${people.length - shown.length}`);
+  const alpha = alphaAt(cx, y);
+  if (alpha <= 0) return;
+  g.globalAlpha = alpha;
+  const { texts, widths, w: total } = chipRow(g, people, dpr);
+  g.font = fontsAt(dpr).chip;
   const pad = 5 * dpr;
   const gap = 3 * dpr;
   const h = 14 * dpr;
-  const widths = texts.map((t) => g.measureText(t).width + pad * 2);
-  let x = cx - (widths.reduce((a, b) => a + b, 0) + gap * (widths.length - 1)) / 2;
+  let x = cx - total / 2;
   g.textAlign = "left";
   g.textBaseline = "middle";
   for (const [i, text] of texts.entries()) {
@@ -34,13 +95,26 @@ export function chips(g: CanvasRenderingContext2D, cx: number, y: number, people
     g.fill();
     g.fillStyle = C.white;
     g.fillText(text, x + pad, y + h / 2 + 0.5 * dpr);
-    const p = shown[i];
+    const p = i < CHIPS_MAX ? people[i] : undefined;
     if (p) chipHits.push({ x, y, w, h, id: p.id });
     x += w + gap;
   }
+  g.globalAlpha = 1;
 }
 
-export const FONT = "ui-monospace, SFMono-Regular, Menlo, monospace";
+/** A pill's text, cut to fit, and its width: measured once per font, width and text, not every frame. */
+const fits = new Map<string, { text: string; w: number }>();
+function fit(g: CanvasRenderingContext2D, font: string, text: string, pad: number, maxW: number) {
+  const key = `${font}\0${maxW}\0${text}`;
+  const hit = fits.get(key);
+  if (hit) return hit;
+  // Too wide (next door's sign is right there): cut it short.
+  while (text.length > 2 && g.measureText(text).width + pad > maxW) text = `${text.slice(0, -2)}…`;
+  const out = { text, w: g.measureText(text).width + pad };
+  if (fits.size > 1000) fits.clear();
+  fits.set(key, out);
+  return out;
+}
 
 export function pill(
   g: CanvasRenderingContext2D,
@@ -52,11 +126,9 @@ export function pill(
   fg: string,
   maxW = Infinity,
 ) {
-  g.font = `600 ${11 * dpr}px ${FONT}`;
-  const pad = 10 * dpr;
-  // Too wide (next door's sign is right there): cut it short.
-  while (text.length > 2 && g.measureText(text).width + pad > maxW) text = `${text.slice(0, -2)}…`;
-  const w = g.measureText(text).width + pad;
+  const font = fontsAt(dpr).pill;
+  g.font = font;
+  const { text: shown, w } = fit(g, font, text, 10 * dpr, maxW);
   const h = 15 * dpr;
   g.fillStyle = bg;
   g.beginPath();
@@ -65,8 +137,51 @@ export function pill(
   g.fillStyle = fg;
   g.textAlign = "center";
   g.textBaseline = "middle";
-  g.fillText(text, cx, y - h / 2 + 0.5 * dpr);
+  g.fillText(shown, cx, y - h / 2 + 0.5 * dpr);
   return { w, h };
+}
+
+/** A pet's name, small and plain (no pill) under it: mine, or one close to me, so a crowd isn't a wall of names. */
+export function petLabel(
+  g: CanvasRenderingContext2D,
+  cx: number,
+  y: number,
+  name: string,
+  dpr: number,
+): void {
+  const alpha = alphaAt(cx, y);
+  if (alpha <= 0) return;
+  g.globalAlpha = alpha;
+  g.font = fontsAt(dpr).pet;
+  g.textAlign = "center";
+  g.textBaseline = "top";
+  g.lineJoin = "round";
+  g.lineWidth = 3 * dpr;
+  g.strokeStyle = "rgba(27, 31, 42, 0.75)";
+  g.strokeText(name, cx, y);
+  g.fillStyle = C.white;
+  g.fillText(name, cx, y);
+  g.globalAlpha = 1;
+}
+
+/** A `pill` over a thing (not a person): faded by how far the player is from it, gone past `LABEL_FAR`. */
+export function nearPill(
+  g: CanvasRenderingContext2D,
+  cx: number,
+  y: number,
+  text: string,
+  dpr: number,
+  bg: string,
+  fg: string,
+  maxW?: number,
+): { w: number; h: number } {
+  const alpha = alphaAt(cx, y);
+  if (alpha <= 0) return { w: 0, h: 0 };
+  const was = g.globalAlpha;
+  g.globalAlpha = was * alpha;
+  const out = pill(g, cx, y, text, dpr, bg, fg, maxW);
+  g.globalAlpha = was;
+  return out;
 }
 
 export function sign(
@@ -78,7 +193,7 @@ export function sign(
   owned: boolean,
   maxW?: number,
 ) {
-  return pill(
+  return nearPill(
     g,
     cx,
     y,
@@ -98,6 +213,8 @@ export function avatarLabels(
   tile: string,
   now: number,
   dpr: number,
+  /** Dancing near another dancer (`battlers` in dance.ts). */
+  battle = false,
 ): void {
   if (a.warp?.out) return;
   const resting = a.state === "away" || a.state === "working";
@@ -119,10 +236,14 @@ export function avatarLabels(
       pill(g, cx, y, `💻 ×${Math.max(1, a.info.liveAgents)}`, dpr, "rgba(143, 227, 255, 0.95)", C.ink).h +
       2 * dpr;
   }
+  if (battle) y -= pill(g, cx, y, "⚔️ Aura battle", dpr, "rgba(179, 107, 255, 0.95)", C.white).h + 2 * dpr;
   const inGame = gameTag(a.info.id);
   if (inGame) y -= pill(g, cx, y, inGame, dpr, "rgba(233, 183, 61, 0.95)", C.ink).h + 2 * dpr;
+  if (!resting) y = polseTag(g, a.info, cx, y, now);
+  const sneeze = sneezeOf(a);
   if (a.bubble && now < a.bubble.until && !resting)
     bubble(g, cx, y, a.bubble.text, dpr, a.bubble.until - now);
+  else if (sneeze !== null) bubble(g, cx, y, SNEEZE_TEXT, dpr, (1 - sneeze) * SNEEZE_MS);
   if (a.burst && now - a.burst.at < BURST_MS) burst(g, cx, top, a.burst.emojis, now - a.burst.at, dpr);
 }
 
@@ -134,7 +255,7 @@ const easeOut = (t: number) => 1 - (1 - t) ** 3;
  * (taking turns when there are several) fanned over the top half, a little
  * staggered, fading out at the end.
  */
-function burst(
+export function burst(
   g: CanvasRenderingContext2D,
   cx: number,
   top: number,
@@ -146,7 +267,7 @@ function burst(
   g.textBaseline = "middle";
   for (let i = 0; i < BURST_COUNT; i++) {
     const delay = (i % 4) * 80;
-    const t = Math.min(1, Math.max(0, (elapsed - delay) / (BURST_MS - 320)));
+    const t = clamp((elapsed - delay) / (BURST_MS - 320), 0, 1);
     if (t === 0) continue;
     const angle = -Math.PI / 2 + ((i + 0.5) / BURST_COUNT - 0.5) * Math.PI * 1.5;
     const reach = (14 + 38 * easeOut(t) + (i % 3) * 6) * dpr;
@@ -193,7 +314,7 @@ export function bubble(
   dpr: number,
   left: number,
 ) {
-  g.font = `500 ${12 * dpr}px ${FONT}`;
+  g.font = fontsAt(dpr).bubble;
   const { shown, w } = wrapped(g, text, dpr);
   const lh = 15 * dpr;
   const h = shown.length * lh + 8 * dpr;

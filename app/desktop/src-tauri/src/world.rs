@@ -120,17 +120,18 @@ pub fn open_link(app: AppHandle, url: String) -> Result<(), String> {
 }
 
 /// A window closed: back to the menu bar only once none are left.
-pub fn closed(app: &AppHandle) {
+pub fn closed(_app: &AppHandle) {
     #[cfg(target_os = "macos")]
-    if app.webview_windows().is_empty() {
-        let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    if _app.webview_windows().is_empty() {
+        let _ = _app.set_activation_policy(tauri::ActivationPolicy::Accessory);
     }
 }
 
-fn shown(app: &AppHandle) {
+fn shown(_app: &AppHandle) {
     #[cfg(target_os = "macos")]
-    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
-    let _ = app.show();
+    let _ = _app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    #[cfg(target_os = "macos")]
+    let _ = _app.show();
 }
 
 /// Brings an open window to the front; false if it isn't open.

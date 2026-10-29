@@ -1,71 +1,12 @@
-import { stat } from "node:fs/promises";
-import { parseClaudeCodeFile } from "../sources/claude-code.ts";
-import { parseCodexFile } from "../sources/codex.ts";
 import {
-  type CursorApiOptions,
-  fetchCursorUsagePages,
-  loadCursorCredentials,
-} from "../sources/cursor-api.ts";
+  type Source as Extracted,
+  type CollectOptions as ExtractOptions,
+  collect as extract,
+} from "llm-usage-extraction";
 import { fetchPullRequests, type GithubAccount, localGithubAccounts } from "../sources/github.ts";
-import {
-  cursorStateDbPath,
-  listClaudeCodeFiles,
-  listClaudeCoworkFiles,
-  listCodexFiles,
-} from "../sources/paths.ts";
-import type { FileState, GithubProblem, Source, SyncState, TokenEvent } from "../types.ts";
-
-/** A file-backed source: list its files, parse one from where the last read stopped. */
-interface FileSource {
-  id: Source;
-  list: () => Promise<string[]>;
-  parse: (
-    path: string,
-    prev: FileState | undefined,
-    mtimeMs: number,
-  ) => Promise<{ events: TokenEvent[]; next: FileState }>;
-}
-
-const claudeParser =
-  (source: "claude_code" | "claude_cowork"): FileSource["parse"] =>
-  async (path, prev, mtimeMs) => {
-    const r = await parseClaudeCodeFile({ path, byteOffset: prev?.byteOffset ?? 0, source });
-    return { events: r.events, next: { path, mtimeMs, byteOffset: r.newOffset } };
-  };
-
-const FILE_SOURCES: readonly FileSource[] = [
-  { id: "claude_code", list: listClaudeCodeFiles, parse: claudeParser("claude_code") },
-  { id: "claude_cowork", list: listClaudeCoworkFiles, parse: claudeParser("claude_cowork") },
-  {
-    id: "codex",
-    list: listCodexFiles,
-    parse: async (path, prev, mtimeMs) => {
-      const r = await parseCodexFile({
-        path,
-        byteOffset: prev?.byteOffset ?? 0,
-        ...(prev?.lastSessionTotals ? { prevSessionTotals: prev.lastSessionTotals } : {}),
-        ...(prev?.lastModel ? { prevModel: prev.lastModel } : {}),
-      });
-      const lastModel = r.lastModel ?? prev?.lastModel;
-      return {
-        events: r.events,
-        next: {
-          path,
-          mtimeMs,
-          byteOffset: r.newOffset,
-          lastSessionTotals: r.sessionTotals,
-          ...(lastModel ? { lastModel } : {}),
-        },
-      };
-    },
-  },
-];
+import type { GithubProblem, Source, SyncState, TokenEvent } from "../types.ts";
 
 const GITHUB_EVERY_MS = 15 * 60_000;
-const CURSOR_EVERY_MS = 15 * 60_000;
-
-/** Same key as the server's unique index, so we never send what it would drop. */
-const dedupKey = (e: TokenEvent) => `${e.source}\0${e.messageId}\0${e.requestId ?? ""}\0${e.messageType}`;
 
 interface Batch {
   events: TokenEvent[];
@@ -73,174 +14,75 @@ interface Batch {
   commit: (state: SyncState) => SyncState;
 }
 
-export interface CollectOptions {
+export interface CollectOptions extends Omit<ExtractOptions, "enabled"> {
   enabled: ReadonlySet<Source>;
-  /** Flush a batch once it holds at least this many events. */
-  batchSize?: number;
-  sources?: readonly FileSource[];
-  cursorDbPath?: string;
-  cursorFetch?: CursorApiOptions["fetch"];
-  cursorCredentials?: () => ReturnType<typeof loadCursorCredentials>;
   /** The GitHub accounts to count PRs for; defaults to `gh`'s, then git's saved login. null skips PRs. */
   githubAccounts?: (() => Promise<GithubAccount[] | GithubProblem>) | null;
   githubFetch?: typeof fetch;
-  now?: () => number;
-  onError?: (err: unknown, where: string) => void;
-}
-
-async function mtimeOf(path: string): Promise<number | null> {
-  try {
-    return (await stat(path)).mtimeMs;
-  } catch {
-    return null;
-  }
 }
 
 /**
- * Walk every enabled source and yield batches of new events. Reading resumes
- * from the offsets in `state`; each batch's `commit` advances them. A caller
- * that stops early (send failed) just re-reads the same bytes next time.
+ * What llm-usage-extraction reads for our sources. Our `cursor_local` is Cursor's dashboard (its
+ * `cursor_api`, with Grok Bot), never its local Cursor parsers, which would count the same usage twice.
+ */
+const extracted = (enabled: ReadonlySet<Source>): Set<Extracted> =>
+  new Set(
+    [...enabled].flatMap((s): Extracted[] =>
+      s === "cursor_local" ? ["cursor_api", "grok_bot"] : s === "github" ? [] : [s],
+    ),
+  );
+
+/**
+ * Every enabled source's new events in batches, from the offsets in `state`: the logs and Cursor's
+ * dashboard through llm-usage-extraction, then GitHub PRs. A caller that stops early (send failed)
+ * just re-reads the same events next time.
  */
 export async function* collect(state: SyncState, opts: CollectOptions): AsyncGenerator<Batch> {
-  const batchSize = opts.batchSize ?? 5000;
-  const sources = opts.sources ?? FILE_SOURCES;
-  const seen = new Set<string>();
-  let events: TokenEvent[] = [];
-  let pending: FileState[] = [];
-
-  const take = (evs: TokenEvent[]) => {
-    for (const e of evs) {
-      const k = dedupKey(e);
-      if (seen.has(k)) continue;
-      seen.add(k);
-      events.push(e);
-    }
-  };
-  const flush = (): Batch => {
-    const batch = { events, files: pending };
-    events = [];
-    pending = [];
-    return {
-      events: batch.events,
-      commit: (s) => {
-        const files = { ...s.files };
-        for (const f of batch.files) files[f.path] = f;
-        return { ...s, files };
-      },
+  const { enabled, githubAccounts, githubFetch, ...rest } = opts;
+  for await (const batch of extract(state, { ...rest, enabled: extracted(enabled) })) {
+    yield {
+      // The server reconciles Cursor estimates against dashboard rows stored as `cursor_local`.
+      events: batch.events.map((e) => ({
+        ...e,
+        source: e.source === "cursor_api" ? "cursor_local" : e.source,
+      })),
+      commit: batch.commit,
     };
-  };
-
-  const present = new Set<string>();
-  for (const source of sources) {
-    if (!opts.enabled.has(source.id)) continue;
-    let paths: string[] = [];
-    try {
-      paths = await source.list();
-    } catch (err) {
-      opts.onError?.(err, `list:${source.id}`);
-    }
-    for (const path of paths) {
-      present.add(path);
-      const mtimeMs = await mtimeOf(path);
-      if (mtimeMs === null) continue;
-      const prev = state.files[path];
-      if (prev && mtimeMs <= prev.mtimeMs) continue;
-      try {
-        const r = await source.parse(path, prev, mtimeMs);
-        take(r.events);
-        pending.push(r.next);
-      } catch (err) {
-        opts.onError?.(err, `parse:${path}`);
-      }
-      if (events.length >= batchSize) yield flush();
-    }
-  }
-
-  const now = (opts.now ?? Date.now)();
-  if (
-    opts.enabled.has("cursor_local") &&
-    (state.cursorApi?.costVersion !== 2 || now - (state.cursorApi?.checkedAt ?? 0) >= CURSOR_EVERY_MS)
-  ) {
-    const dbPath = opts.cursorDbPath ?? cursorStateDbPath();
-    if (opts.cursorCredentials || (await mtimeOf(dbPath)) !== null) {
-      try {
-        const credentials = opts.cursorCredentials ?? (() => loadCursorCredentials(dbPath));
-        const accountId = credentials().accountId;
-        const since =
-          state.cursorApi?.accountId === accountId && state.cursorApi.costVersion === 2
-            ? Math.max(0, state.cursorApi.checkedAt - 7 * 24 * 60 * 60_000)
-            : 0;
-        for await (const r of fetchCursorUsagePages({
-          dbPath,
-          since,
-          until: now,
-          credentials,
-          expectedAccountId: accountId,
-          fetch: opts.cursorFetch,
-        })) {
-          take(r.events);
-          const batch = flush();
-          yield {
-            events: batch.events,
-            commit: (s) =>
-              r.done
-                ? {
-                    ...batch.commit(s),
-                    cursorApi: { accountId: r.accountId, checkedAt: now, costVersion: 2 },
-                  }
-                : batch.commit(s),
-          };
-        }
-      } catch (err) {
-        opts.onError?.(err, "cursor");
-      }
-    }
   }
 
   // PRs change a few times a day, and search has a tight rate limit: ask at most every 15 minutes.
-  const checkedAt = state.github?.checkedAt ?? 0;
-  if (opts.enabled.has("github") && opts.githubAccounts !== null && now - checkedAt >= GITHUB_EVERY_MS) {
-    try {
-      const found = await (opts.githubAccounts ?? localGithubAccounts)();
-      const cursors = { ...state.github?.cursors };
-      let problem: GithubProblem | undefined;
-      if (typeof found === "string") {
-        problem = found;
-      } else {
-        let rejected = 0;
-        for (const account of found) {
-          const key = `${account.host}/${account.login}`;
-          const r = await fetchPullRequests(account, cursors[key] ?? null, opts.githubFetch, (msg) =>
-            opts.onError?.(msg, "github"),
-          );
-          take(r.events);
-          if (r.since) cursors[key] = r.since;
-          if (r.rejected) rejected++;
-        }
-        if (rejected === found.length) problem = "signed_out";
+  const now = (opts.now ?? Date.now)();
+  if (
+    !enabled.has("github") ||
+    githubAccounts === null ||
+    now - (state.github?.checkedAt ?? 0) < GITHUB_EVERY_MS
+  )
+    return;
+  try {
+    const found = await (githubAccounts ?? localGithubAccounts)();
+    const cursors = { ...state.github?.cursors };
+    const events: TokenEvent[] = [];
+    let problem: GithubProblem | undefined;
+    if (typeof found === "string") {
+      problem = found;
+    } else {
+      let rejected = 0;
+      for (const account of found) {
+        const key = `${account.host}/${account.login}`;
+        const r = await fetchPullRequests(account, cursors[key] ?? null, githubFetch, (msg) =>
+          opts.onError?.(msg, "github"),
+        );
+        events.push(...r.events);
+        if (r.since) cursors[key] = r.since;
+        if (r.rejected) rejected++;
       }
-      const batch = flush();
-      yield {
-        events: batch.events,
-        commit: (s) => ({
-          ...batch.commit(s),
-          github: { cursors, checkedAt: now, ...(problem ? { problem } : {}) },
-        }),
-      };
-    } catch (err) {
-      opts.onError?.(err, "github");
+      if (rejected === found.length) problem = "signed_out";
     }
+    yield {
+      events,
+      commit: (s) => ({ ...s, github: { cursors, checkedAt: now, ...(problem ? { problem } : {}) } }),
+    };
+  } catch (err) {
+    opts.onError?.(err, "github");
   }
-
-  // Final batch also forgets files that no longer exist on disk.
-  const last = flush();
-  yield {
-    events: last.events,
-    commit: (s) => {
-      const next = last.commit(s);
-      const files: SyncState["files"] = {};
-      for (const [path, f] of Object.entries(next.files)) if (present.has(path)) files[path] = f;
-      return { ...next, files };
-    },
-  };
 }

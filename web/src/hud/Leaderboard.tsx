@@ -7,20 +7,17 @@ import type {
   BoardPlayer,
   GamePlayer,
 } from "@tokenmaxxing/server/registry";
+import { typedSwitch } from "hanzio";
 import { type ReactNode, useEffect, useState } from "react";
 import { town } from "../net.ts";
 import { hud, useHud } from "../store.ts";
-import { AvatarImage, House, Modal, Pills } from "./ui.tsx";
+import { ranges } from "./format.ts";
+import { AvatarImage, House, Modal, Pills, useLoad } from "./ui.tsx";
 
 type Sort = Board["sort"];
 type Totals = BoardPlayer | BoardCompany;
 
-const RANGES = [
-  ["today", "Today"],
-  ["7d", "7 days"],
-  ["30d", "30 days"],
-  ["all", "All time"],
-] as const;
+const RANGES = ranges("All time");
 const SORTS = [
   ["tokens", "Tokens"],
   ["cost", "Cost"],
@@ -54,9 +51,6 @@ const BY: Record<
   },
   prs: { value: (t) => t.prs, show: (t) => plural(t.prs, "PR"), aside: (t) => compact(t.tokens) },
 };
-const metric = (sort: Sort, t: Totals) => BY[sort].value(t);
-const shown = (sort: Sort, t: Totals) => BY[sort].show(t);
-const aside = (sort: Sort, t: Totals) => BY[sort].aside(t);
 
 const members = (n: number) => plural(n, "member");
 
@@ -69,8 +63,11 @@ export function Leaderboard() {
   const [sort, setSort] = useState<Sort>("tokens");
   const [tab, setTab] = useState<"players" | "companies" | "games">("players");
   const [board, setBoard] = useState<Board | null>(null);
+  const games = tab === "games";
 
+  // The games tab has a board of its own.
   useEffect(() => {
+    if (games) return;
     let live = true;
     const load = () => town.leaderboard(range, sort).then((b) => live && setBoard(b));
     void load();
@@ -79,12 +76,13 @@ export function Leaderboard() {
       live = false;
       clearInterval(id);
     };
-  }, [range, sort]);
+  }, [range, sort, games]);
 
   const players = board?.players ?? [];
-  const companies = (board?.companies ?? []).filter((c) => metric(sort, c) > 0);
+  const by = BY[sort];
+  const companies = (board?.companies ?? []).filter((c) => by.value(c) > 0);
   const rows: Totals[] = tab === "players" ? players : companies;
-  const top = rows[0] ? metric(sort, rows[0]) : 0;
+  const top = rows[0] ? by.value(rows[0]) : 0;
 
   return (
     <Modal title="🏆 Leaderboard" wide>
@@ -100,7 +98,7 @@ export function Leaderboard() {
         />
         <Pills value={range} options={RANGES} onChange={setRange} />
       </div>
-      {tab === "games" ? (
+      {games ? (
         <GamesBoard range={range} me={me} />
       ) : (
         <>
@@ -135,14 +133,35 @@ export function Leaderboard() {
                     <span className="lb-sub">
                       {"userId" in r ? (r.company ?? `Lv${r.level}`) : members(r.members)}
                     </span>
-                    <span className="lb-value">{shown(sort, r)}</span>
+                    <span className="lb-value">{by.show(r)}</span>
                   </Step>
                 ))}
               </Podium>
               {rows.length > 3 && (
                 <ol className="lb-list">
                   {rows.slice(3).map((r) => (
-                    <Row key={key(r)} row={r} sort={sort} top={top} mine={"userId" in r && r.userId === me} />
+                    <BoardRow
+                      key={key(r)}
+                      rank={r.rank}
+                      picture={
+                        "userId" in r ? (
+                          <AvatarImage look={r.look} scale={2} />
+                        ) : (
+                          <House companyId={r.companyId} tier={r.tier} scale={0.3} />
+                        )
+                      }
+                      name={r.name}
+                      sub={
+                        "userId" in r
+                          ? `Lv${r.level}${r.company ? ` · ${r.company}` : ""}`
+                          : `${members(r.members)} · ${houseTierName(r.tier)}`
+                      }
+                      share={top > 0 ? Math.max(0.02, by.value(r) / top) : 0}
+                      value={by.show(r)}
+                      aside={by.aside(r)}
+                      mine={"userId" in r && r.userId === me}
+                      onClick={"userId" in r ? () => openCard(r.userId) : () => openCompany(r.companyId)}
+                    />
                   ))}
                 </ol>
               )}
@@ -164,21 +183,18 @@ type GameSort = (typeof GAME_SORTS)[number][0];
 const MIN_GAMES = 10;
 
 const gameValue = (sort: GameSort, p: GamePlayer) =>
-  sort === "net" ? p.net : sort === "rate" ? p.wins / p.played : p.biggestPot;
+  typedSwitch(sort, {
+    net: () => p.net,
+    rate: () => p.wins / p.played,
+    pot: () => p.biggestPot,
+  });
 const gameShown = (sort: GameSort, p: GamePlayer) =>
   sort === "rate" ? `${Math.round((p.wins / p.played) * 100)}%` : `🪙 ${gameValue(sort, p)}`;
 
 /** Who's best at the arcade: most coins won, best win rate, biggest pots. */
 function GamesBoard({ range, me }: { range: RangeKey; me: number | undefined }) {
   const [sort, setSort] = useState<GameSort>("net");
-  const [all, setAll] = useState<GamePlayer[] | null>(null);
-  useEffect(() => {
-    let live = true;
-    town.gameBoard(range).then((b) => live && setAll(b));
-    return () => {
-      live = false;
-    };
-  }, [range]);
+  const { data: all } = useLoad(() => town.gameBoard(range), [range]);
   const rows = (all ?? [])
     .filter((p) => (sort === "rate" ? p.played >= MIN_GAMES : gameValue(sort, p) > 0))
     .sort((a, b) => gameValue(sort, b) - gameValue(sort, a) || b.played - a.played)
@@ -215,26 +231,17 @@ function GamesBoard({ range, me }: { range: RangeKey; me: number | undefined }) 
           {rows.length > 3 && (
             <ol className="lb-list">
               {rows.slice(3).map((r, i) => (
-                <li key={r.userId} className={r.userId === me ? "mine" : undefined}>
-                  <button type="button" className="lb-item" onClick={() => openCard(r.userId)}>
-                    <span className="lb-rank">{i + 4}</span>
-                    <AvatarImage look={r.look} scale={2} />
-                    <span className="lb-who">
-                      <span className="lb-line">
-                        <strong>{r.name}</strong>
-                        <small className="muted">
-                          {r.wins}/{r.played} won
-                        </small>
-                      </span>
-                      <span className="lb-bar">
-                        <span style={{ width: `${Math.max(0.02, gameValue(sort, r) / top) * 100}%` }} />
-                      </span>
-                    </span>
-                    <span className="lb-values">
-                      <span className="lb-value">{gameShown(sort, r)}</span>
-                    </span>
-                  </button>
-                </li>
+                <BoardRow
+                  key={r.userId}
+                  rank={i + 4}
+                  picture={<AvatarImage look={r.look} scale={2} />}
+                  name={r.name}
+                  sub={`${r.wins}/${r.played} won`}
+                  share={Math.max(0.02, gameValue(sort, r) / top)}
+                  value={gameShown(sort, r)}
+                  mine={r.userId === me}
+                  onClick={() => openCard(r.userId)}
+                />
               ))}
             </ol>
           )}
@@ -258,61 +265,59 @@ function Podium({ children }: { children: ReactNode[] }) {
   );
 }
 
-function Step({ place, onClick, children }: { place: number; onClick?: () => void; children: ReactNode }) {
-  const body = (
-    <>
+function Step({ place, onClick, children }: { place: number; onClick: () => void; children: ReactNode }) {
+  return (
+    <button type="button" className={`step p${place}`} onClick={onClick}>
       {place === 1 && <span className="crown">👑</span>}
       {children}
       <span className="pedestal">{place}</span>
-    </>
-  );
-  return onClick ? (
-    <button type="button" className={`step p${place}`} onClick={onClick}>
-      {body}
     </button>
-  ) : (
-    <div className={`step p${place}`}>{body}</div>
   );
 }
 
-function Row({ row, sort, top, mine }: { row: Totals; sort: Sort; top: number; mine: boolean }) {
-  const player = "userId" in row ? row : null;
-  const share = top > 0 ? Math.max(0.02, metric(sort, row) / top) : 0;
-  const body = (
-    <>
-      <span className="lb-rank">{row.rank}</span>
-      {player ? (
-        <AvatarImage look={player.look} scale={2} />
-      ) : (
-        <House companyId={(row as BoardCompany).companyId} tier={(row as BoardCompany).tier} scale={0.3} />
-      )}
-      <span className="lb-who">
-        <span className="lb-line">
-          <strong>{row.name}</strong>
-          <small className="muted">
-            {player
-              ? `Lv${player.level}${player.company ? ` · ${player.company}` : ""}`
-              : `${members((row as BoardCompany).members)} · ${houseTierName((row as BoardCompany).tier)}`}
-          </small>
-        </span>
-        <span className="lb-bar">
-          <span style={{ width: `${share * 100}%` }} />
-        </span>
-      </span>
-      <span className="lb-values">
-        <span className="lb-value">{shown(sort, row)}</span>
-        <small className="muted">{aside(sort, row)}</small>
-      </span>
-    </>
-  );
+/**
+ * A row under the podium (and a company's people): who, a line under the name, a bar for `share` of
+ * the top, and the number. Without a `rank`, the order says it.
+ */
+export function BoardRow({
+  rank,
+  picture,
+  name,
+  sub,
+  share,
+  value,
+  aside,
+  mine,
+  onClick,
+}: {
+  rank?: number;
+  picture: ReactNode;
+  name: ReactNode;
+  sub: string;
+  share: number;
+  value: string;
+  aside?: string;
+  mine?: boolean;
+  onClick: () => void;
+}) {
   return (
     <li className={mine ? "mine" : undefined}>
-      <button
-        type="button"
-        className="lb-item"
-        onClick={() => (player ? openCard(player.userId) : openCompany((row as BoardCompany).companyId))}
-      >
-        {body}
+      <button type="button" className="lb-item" onClick={onClick}>
+        {rank !== undefined && <span className="lb-rank">{rank}</span>}
+        {picture}
+        <span className="lb-who">
+          <span className="lb-line">
+            <strong>{name}</strong>
+            <small className="muted">{sub}</small>
+          </span>
+          <span className="lb-bar">
+            <span style={{ width: `${share * 100}%` }} />
+          </span>
+        </span>
+        <span className="lb-values">
+          <span className="lb-value">{value}</span>
+          {aside !== undefined && <small className="muted">{aside}</small>}
+        </span>
       </button>
     </li>
   );

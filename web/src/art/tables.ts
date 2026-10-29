@@ -3,6 +3,7 @@
  * and arena desks with laptops for long games. Drawn in code like the rest.
  */
 import type { GameId } from "@tokenmaxxing/core/games/types.ts";
+import { typedSwitch, typedSwitchGroup } from "hanzio";
 import { C } from "./palette.ts";
 import { bake, cached, type Pen } from "./pixels.ts";
 
@@ -19,36 +20,53 @@ export const gameTable = cached(
   (game: GameId) => game,
   (game: GameId) =>
     bake(16, 16, (p) => {
-      if (game === "dice") {
-        // A green card table with two dice.
-        tableBase(p, "#3f8f5a", "#2c6b41");
-        for (const [x, y] of [
-          [5, 5],
-          [9, 7],
-        ] as const) {
-          p.rect(x, y, 3, 3, C.white);
-          p.px(x + 1, y + 1, C.ink);
-        }
-      } else if (game === "hype") {
-        // A small screen with a line shooting up.
-        tableBase(p, C.wood, C.woodDark);
-        p.rect(3, 1, 10, 8, C.ink);
-        p.rect(4, 2, 8, 6, "#1b1f2a");
-        for (const [x, y] of [
-          [4, 7],
-          [6, 6],
-          [8, 5],
-          [10, 3],
-          [11, 2],
-        ] as const)
-          p.px(x, y, "#3ddc84");
-      } else {
-        // A desk bell between two founders.
-        tableBase(p, C.woodLight, C.wood);
-        p.rect(6, 4, 4, 1, C.ink);
-        p.disc(8, 6, 2, "#e9b73d");
-        p.rect(6, 7, 5, 1, C.ink);
-      }
+      typedSwitch(game, {
+        dice: () => {
+          // A green card table with two dice.
+          tableBase(p, "#3f8f5a", "#2c6b41");
+          for (const [x, y] of [
+            [5, 5],
+            [9, 7],
+          ] as const) {
+            p.rect(x, y, 3, 3, C.white);
+            p.px(x + 1, y + 1, C.ink);
+          }
+        },
+        hype: () => {
+          // A small screen with a line shooting up.
+          tableBase(p, C.wood, C.woodDark);
+          p.rect(3, 1, 10, 8, C.ink);
+          p.rect(4, 2, 8, 6, "#1b1f2a");
+          for (const [x, y] of [
+            [4, 7],
+            [6, 6],
+            [8, 5],
+            [10, 3],
+            [11, 2],
+          ] as const)
+            p.px(x, y, "#3ddc84");
+        },
+        sprint: () => {
+          // A keyboard with a row of keys lit up, mid-race.
+          tableBase(p, C.wood, C.woodDark);
+          p.rect(2, 4, 12, 6, C.ink);
+          p.rect(3, 5, 10, 4, C.metal);
+          for (let x = 3; x < 13; x += 2) {
+            p.px(x, 5, C.metalLight);
+            p.px(x + 1, 7, C.metalLight);
+          }
+          p.rect(5, 8, 6, 1, C.white);
+          p.px(9, 5, C.lamp);
+          p.px(4, 7, C.lamp);
+        },
+        ...typedSwitchGroup(game, ["spr", "tokenmaxxing"], () => {
+          // A desk bell between two founders.
+          tableBase(p, C.woodLight, C.wood);
+          p.rect(6, 4, 4, 1, C.ink);
+          p.disc(8, 6, 2, "#e9b73d");
+          p.rect(6, 7, 5, 1, C.ink);
+        }),
+      });
     }),
 );
 

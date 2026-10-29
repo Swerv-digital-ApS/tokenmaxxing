@@ -23,11 +23,13 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "tm-sync-"));
   statePath = join(dir, "state", "state.json");
   process.env.CLAUDE_CONFIG_DIR = join(dir, "claude");
+  process.env.POSTHOG_DESKTOP_DIR = join(dir, "posthog");
   await mkdir(join(dir, "claude", "projects", "p"), { recursive: true });
 });
 
 afterEach(async () => {
   delete process.env.CLAUDE_CONFIG_DIR;
+  delete process.env.POSTHOG_DESKTOP_DIR;
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -114,17 +116,19 @@ describe("sync", () => {
     expect(state.github?.problem).toBe("no_gh");
   });
 
-  test("deleted files are forgotten; the same message in two files is sent once", async () => {
+  test("deleted files are forgotten; the same message in two files, or twice in one, is sent once", async () => {
     const dirP = join(dir, "claude", "projects", "p");
+    const prompt = `${JSON.stringify({ type: "user", uuid: "u1", message: { content: "hi" } })}\n`;
     await writeFile(join(dirP, "a.jsonl"), line("m1"));
-    await writeFile(join(dirP, "b.jsonl"), line("m1") + line("m2")); // a subagent log repeating m1
+    // A subagent log repeating m1, and a prompt logged twice.
+    await writeFile(join(dirP, "b.jsonl"), line("m1") + line("m2") + prompt + prompt);
     const sent: TokenEvent[] = [];
     const send = async (events: TokenEvent[]) => {
       sent.push(...events);
       return { inserted: events.length, duplicates: 0 };
     };
     const r1 = await sync(emptyState(), { statePath, enabled, send });
-    expect(sent.map((e) => e.messageId).sort()).toEqual(["m1", "m2"]);
+    expect(sent.map((e) => e.messageId).sort()).toEqual(["m1", "m2", "u1"]);
     await rm(join(dirP, "a.jsonl"));
     const r2 = await sync(r1.state, { statePath, enabled, send });
     expect(Object.keys(r2.state.files)).toEqual([join(dirP, "b.jsonl")]);

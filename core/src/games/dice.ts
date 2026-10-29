@@ -3,8 +3,9 @@
  * rolls in secret, then claims go round about all the dice on the table until
  * someone calls "Liar!". Whoever was wrong loses a die; the last with dice wins.
  */
+import { recordFromKeys, sumBy } from "hanzio";
 import { random } from "./random.ts";
-import { type Callout, type GameDef, refused } from "./types.ts";
+import { type Callout, type GameDef, lastStanding, refused } from "./types.ts";
 
 const DICE = 5;
 export const TURN_MS = 30_000;
@@ -12,7 +13,7 @@ export const REVEAL_MS = 4_000;
 /** 🦄 is the 1: wild, and not claimable itself. */
 export const FACES = ["", "🦄", "📉", "📊", "📈", "🚀", "💰"] as const;
 
-export interface Claim {
+interface Claim {
   player: number;
   count: number;
   face: number;
@@ -55,14 +56,12 @@ export interface DiceView {
 }
 
 const alive = (s: DiceState) => s.players.filter((p) => !s.out.includes(p));
-const total = (s: DiceState) => alive(s).reduce((n, p) => n + (s.dice[p]?.length ?? 0), 0);
+const total = (s: DiceState) => sumBy(alive(s), (p) => s.dice[p]?.length);
 const matching = (dice: number[], face: number) => dice.filter((d) => d === face || d === 1).length;
 
 function roll(s: DiceState, starter: number, now: number): DiceState {
   const rng = random(s.seed + s.round * 7919);
-  const dice = Object.fromEntries(
-    s.players.map((p) => [p, (s.dice[p] ?? []).map(() => 1 + Math.floor(rng() * 6))]),
-  );
+  const dice = recordFromKeys(s.players, (p) => (s.dice[p] ?? []).map(() => 1 + Math.floor(rng() * 6)));
   return { ...s, dice, claims: [], turn: starter, deadline: now + TURN_MS, round: s.round + 1 };
 }
 
@@ -79,7 +78,7 @@ function after(s: DiceState, p: number): number {
 /** `loser` loses a die; out of dice and they're out. Shows everyone's dice, then a new round. */
 function lose(s: DiceState, loser: number, caller: number | null, now: number): DiceState {
   const claim = s.claims.at(-1);
-  const actual = claim ? Object.values(s.dice).reduce((n, d) => n + matching(d, claim.face), 0) : 0;
+  const actual = claim ? sumBy(Object.values(s.dice), (d) => matching(d, claim.face)) : 0;
   const left = s.dice[loser]!.slice(1);
   const next: DiceState = {
     ...s,
@@ -102,7 +101,7 @@ export const dice: GameDef<DiceState, DiceView> = {
   setup(players, seed, _options, now) {
     const s: DiceState = {
       players,
-      dice: Object.fromEntries(players.map((p) => [p, Array(DICE).fill(0)])),
+      dice: recordFromKeys(players, () => Array(DICE).fill(0)),
       claims: [],
       turn: players[0]!,
       deadline: 0,
@@ -122,7 +121,7 @@ export const dice: GameDef<DiceState, DiceView> = {
     const last = s.claims.at(-1);
     if (m?.liar === true) {
       if (!last) return refused("Nobody has claimed anything yet.");
-      const actual = Object.values(s.dice).reduce((n, d) => n + matching(d, last.face), 0);
+      const actual = sumBy(Object.values(s.dice), (d) => matching(d, last.face));
       return lose(s, actual >= last.count ? player : last.player, player, now);
     }
     const count = Number(m?.count);
@@ -159,7 +158,7 @@ export const dice: GameDef<DiceState, DiceView> = {
     return {
       players: s.players,
       mine: viewer !== null && s.players.includes(viewer) ? s.dice[viewer]! : null,
-      counts: Object.fromEntries(s.players.map((p) => [p, s.dice[p]!.length])),
+      counts: recordFromKeys(s.players, (p) => s.dice[p]!.length),
       claims: s.claims,
       turn: s.turn,
       deadline: s.deadline,
@@ -168,12 +167,8 @@ export const dice: GameDef<DiceState, DiceView> = {
     };
   },
 
-  outcome(s) {
-    const left = alive(s);
-    // Everyone leaving at once still ends it: the last one out places best.
-    const gone = [...s.out].reverse().map((p) => [p]);
-    return left.length <= 1 ? { places: [left, ...gone].filter((g) => g.length > 0) } : null;
-  },
+  // Everyone leaving at once still ends it: the last one out places best.
+  outcome: (s) => lastStanding(alive(s), s.out),
 
   betsCloseAt: (s) => s.startedAt + 20_000,
 

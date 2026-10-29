@@ -1,5 +1,7 @@
 import type { registry } from "@tokenmaxxing/server/registry";
 import { createClient } from "rivetkit/client";
+import { errorCode } from "../errors.ts";
+import { storage } from "../storage.ts";
 
 const TOKEN_KEY = "tokenmaxxing.admin";
 
@@ -18,23 +20,20 @@ export function savedToken(): string | null {
   const fragment = new URLSearchParams(url.hash.slice(1));
   const token = fragment.get("token") ?? url.searchParams.get("token");
   if (token) {
-    localStorage.setItem(TOKEN_KEY, token);
+    storage.setItem(TOKEN_KEY, token);
     url.searchParams.delete("token");
     history.replaceState(null, "", url.pathname + url.search);
   }
-  return localStorage.getItem(TOKEN_KEY);
+  return storage.getItem(TOKEN_KEY);
 }
 
-export const saveToken = (token: string) => localStorage.setItem(TOKEN_KEY, token);
-export const forgetToken = () => localStorage.removeItem(TOKEN_KEY);
+export const saveToken = (token: string) => storage.setItem(TOKEN_KEY, token);
+export const forgetToken = () => storage.removeItem(TOKEN_KEY);
 
 export const connectAdmin = (token: string): AdminConn =>
   client.town.getOrCreate(["main"], { params: { admin: token } }).connect();
 
 export const isUnauthorized = (err: unknown) => {
-  const code = (err as { code?: string } | null)?.code;
+  const code = errorCode(err);
   return code === "unauthorized" || code === "forbidden";
 };
-
-export const errorText = (err: unknown): string =>
-  (err as { message?: string } | null)?.message?.replace(/^.*?: /, "") ?? "Something went wrong.";

@@ -4,8 +4,8 @@
   "version": "../../../package.json",
   "identifier": "dk.hanskristoffer.tokenmaxxing",
   "build": {
-    "beforeDevCommand": "bash scripts/helper.sh",
-    "beforeBuildCommand": "bash scripts/helper.sh"
+    "beforeDevCommand": "bun scripts/helper.ts",
+    "beforeBuildCommand": "bun scripts/helper.ts"
   },
   "app": {
     "withGlobalTauri": true,

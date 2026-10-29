@@ -1,4 +1,5 @@
 /** How pots and side bets are paid out. Pure integer math: every coin in comes back out. */
+import { sortBy, sumBy, typedSwitch } from "hanzio";
 
 export type Split = "all" | "top3" | "half";
 
@@ -19,9 +20,17 @@ export const effectiveSplit = (split: Split, players: number): Split =>
 /** Each finishing position's share of the pot, best first. */
 function weights(split: Split, players: number): number[] {
   const w = new Array<number>(players).fill(0);
-  if (split === "all") w[0] = 1;
-  else if (split === "top3") [w[0], w[1], w[2]] = [60, 30, 10];
-  else for (let i = 0; i < Math.floor(players / 2); i++) w[i] = 1;
+  typedSwitch(split, {
+    all: () => {
+      w[0] = 1;
+    },
+    top3: () => {
+      [w[0], w[1], w[2]] = [60, 30, 10];
+    },
+    half: () => {
+      for (let i = 0; i < Math.floor(players / 2); i++) w[i] = 1;
+    },
+  });
   return w;
 }
 
@@ -30,7 +39,7 @@ function weights(split: Split, players: number): number[] {
  * down `order` (best placed first, then lowest user id).
  */
 function divide(amount: number, parts: { id: number; weight: number }[]): Map<number, number> {
-  const total = parts.reduce((n, p) => n + p.weight, 0);
+  const total = sumBy(parts, "weight");
   const out = new Map<number, number>();
   if (total <= 0 || amount <= 0) return out;
   let given = 0;
@@ -53,14 +62,14 @@ function divide(amount: number, parts: { id: number; weight: number }[]): Map<nu
  * occupy: two players tied first under "top 3" split 60 + 30 evenly.
  */
 export function potShares(places: number[][], pot: number, split: Split): Map<number, number> {
-  const players = places.reduce((n, g) => n + g.length, 0);
+  const players = sumBy(places, (g) => g.length);
   const w = weights(effectiveSplit(split, players), players);
   const parts: { id: number; weight: number }[] = [];
   let pos = 0;
   for (const group of places) {
-    const groupWeight = w.slice(pos, pos + group.length).reduce((n, x) => n + x, 0);
+    const groupWeight = sumBy(w.slice(pos, pos + group.length), (x) => x);
     // Even within the group, in id order so remainders are predictable.
-    for (const id of [...group].sort((a, b) => a - b)) parts.push({ id, weight: groupWeight / group.length });
+    for (const id of sortBy(group)) parts.push({ id, weight: groupWeight / group.length });
     pos += group.length;
   }
   // Scale fractional weights to integers so `divide` stays exact.
@@ -87,10 +96,12 @@ export function sideBetShares(
   bets: SideBet[],
   winners: number[],
 ): { refund: boolean; shares: Map<number, number> } {
-  const pool = bets.reduce((n, b) => n + b.amount, 0);
-  const backers = bets
-    .filter((b) => winners.includes(b.on))
-    .sort((a, b) => b.amount - a.amount || a.userId - b.userId);
+  const pool = sumBy(bets, "amount");
+  const backers = sortBy(
+    bets.filter((b) => winners.includes(b.on)),
+    { by: "amount", order: "desc" },
+    "userId",
+  );
   if (backers.length === 0) return { refund: true, shares: new Map(bets.map((b) => [b.userId, b.amount])) };
   return {
     refund: false,
@@ -103,7 +114,10 @@ export function sideBetShares(
 
 /** What a coin on `player` pays back if they win (×1.8), or null with no bets on them yet. */
 export function odds(bets: SideBet[], player: number): number | null {
-  const on = bets.filter((b) => b.on === player).reduce((n, b) => n + b.amount, 0);
+  const on = sumBy(
+    bets.filter((b) => b.on === player),
+    "amount",
+  );
   if (on === 0) return null;
-  return bets.reduce((n, b) => n + b.amount, 0) / on;
+  return sumBy(bets, "amount") / on;
 }

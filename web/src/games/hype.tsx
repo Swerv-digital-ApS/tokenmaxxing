@@ -1,24 +1,24 @@
 import { secondsUntil } from "@tokenmaxxing/core/format.ts";
 import { COUNTDOWN_MS, type HypeView, msToReach, multiplier } from "@tokenmaxxing/core/games/hype.ts";
 import { sha256 } from "@tokenmaxxing/core/games/sha256.ts";
+import { sortBy } from "hanzio";
 import { useEffect, useState } from "react";
-import { useHud } from "../store.ts";
+import { hud } from "../store.ts";
 import type { GameProps } from "./types.ts";
 
 const x = (n: number) => `×${(n / 100).toFixed(2)}`;
 
 /** The server's clock every animation frame while `on`, so the line climbs smoothly; else `now`. */
 function useFrameNow(on: boolean, now: number): number {
-  const skew = useHud((s) => s.clockSkew);
   const [frame, setFrame] = useState(now);
   useEffect(() => {
     if (!on) return;
     let id = requestAnimationFrame(function tick() {
-      setFrame(Date.now() - skew);
+      setFrame(Date.now() - hud.get().clockSkew);
       id = requestAnimationFrame(tick);
     });
     return () => cancelAnimationFrame(id);
-  }, [on, skew]);
+  }, [on]);
   return on ? frame : now;
 }
 
@@ -63,24 +63,22 @@ export function Hype({ view, you, now, move, name }: GameProps<HypeView>) {
           </tr>
         </thead>
         <tbody>
-          {[...view.players]
-            .sort((a, b) => (view.totals[b] ?? 0) - (view.totals[a] ?? 0))
-            .map((p) => (
-              <tr key={p} className={p === you ? "me" : undefined}>
-                <td>
-                  {name(p)}
-                  {view.forfeited.includes(p) && " 🏳️"}
+          {sortBy(view.players, { by: (p) => view.totals[p] ?? 0, order: "desc" }).map((p) => (
+            <tr key={p} className={p === you ? "me" : undefined}>
+              <td>
+                {name(p)}
+                {view.forfeited.includes(p) && " 🏳️"}
+              </td>
+              {view.rounds.map((r) => (
+                <td key={r.hash}>
+                  {r.cashed[p] !== undefined ? `🪂 ${x(r.cashed[p]!)}` : r.endedAt !== null ? "💥" : "…"}
                 </td>
-                {view.rounds.map((r) => (
-                  <td key={r.hash}>
-                    {r.cashed[p] !== undefined ? `🪂 ${x(r.cashed[p]!)}` : r.endedAt !== null ? "💥" : "…"}
-                  </td>
-                ))}
-                <td>
-                  <strong>{x(view.totals[p] ?? 0)}</strong>
-                </td>
-              </tr>
-            ))}
+              ))}
+              <td>
+                <strong>{x(view.totals[p] ?? 0)}</strong>
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
       <details className="hype-fair">

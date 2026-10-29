@@ -4,9 +4,10 @@
  * seed whose hash everyone sees before the round and whose seed everyone sees
  * after, so nobody (not even the server) can move it mid-round.
  */
+import { clamp, recordFromKeys, sumBy } from "hanzio";
 import { random } from "./random.ts";
 import { sha256 } from "./sha256.ts";
-import { type GameDef, refused } from "./types.ts";
+import { byScore, type GameDef, lastStanding, leave, leavers, refused } from "./types.ts";
 
 const ROUNDS = 3;
 /** The countdown before each round. */
@@ -23,7 +24,7 @@ export const msToReach = (m: number) => 12_000 * Math.log(m);
 /** The crash point for a round's seed, in hundredths: max(1, 0.99 / (1 − u)), capped at ×50. */
 export function crashPoint(seed: string): number {
   const u = Number.parseInt(sha256(`crash:${seed}`).slice(0, 13), 16) / 16 ** 13;
-  return Math.floor(Math.min(MAX_CRASH, Math.max(1, 0.99 / (1 - u))) * 100);
+  return Math.floor(clamp(0.99 / (1 - u), 1, MAX_CRASH) * 100);
 }
 
 interface HypeRound {
@@ -56,12 +57,7 @@ const current = (s: HypeState) => s.rounds.findIndex((r) => r.endedAt === null);
 const active = (s: HypeState) => s.players.filter((p) => !s.forfeited.includes(p));
 
 const totals = (s: HypeState) =>
-  Object.fromEntries(
-    s.players.map((p) => [
-      p,
-      s.rounds.reduce((n, r) => n + (r.endedAt !== null ? (r.cashed[p] ?? 0) : 0), 0),
-    ]),
-  );
+  recordFromKeys(s.players, (p) => sumBy(s.rounds, (r) => (r.endedAt !== null ? r.cashed[p] : 0)));
 
 /** Ends round `i` at `now` and schedules the next one. */
 function end(s: HypeState, i: number, now: number): HypeState {
@@ -124,7 +120,7 @@ export const hype: GameDef<HypeState, HypeView> = {
     return now >= r.startsAt + msToReach(r.crash / 100) ? end(s, i, now) : s;
   },
 
-  forfeit: (s, player) => (s.forfeited.includes(player) ? s : { ...s, forfeited: [...s.forfeited, player] }),
+  forfeit: leave,
 
   view(s) {
     const i = current(s);
@@ -140,16 +136,12 @@ export const hype: GameDef<HypeState, HypeView> = {
 
   outcome(s) {
     const left = active(s);
-    // Whoever left last places best among those who left.
-    const gone = [...s.forfeited].reverse().map((p) => [p]);
-    if (left.length <= 1) return { places: [left, ...gone].filter((g) => g.length > 0) };
+    const over = lastStanding(left, s.forfeited);
+    if (over) return over;
     if (current(s) !== -1) return null;
     const t = totals(s);
     if (left.every((p) => t[p] === 0)) return { void: "Everyone crashed in every round." };
-    const scores = [...new Set(left.map((p) => t[p]!))].sort((a, b) => b - a);
-    return {
-      places: [...scores.map((n) => left.filter((p) => t[p] === n)), ...gone],
-    };
+    return { places: [...byScore(left, (p) => t[p]!), ...leavers(s.forfeited)] };
   },
 
   betsCloseAt: (s) => s.rounds[0]!.startsAt + 10_000,

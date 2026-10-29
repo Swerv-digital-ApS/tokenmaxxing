@@ -1,0 +1,620 @@
+/* The Night Market case opening (CaseOpening.tsx). Class names are cs-*. */
+.cs-top {
+  flex: none;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+.cs-info {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cs-actions {
+  display: flex;
+  gap: 8px;
+}
+.cs-box {
+  position: relative;
+  flex: none;
+  width: 110px;
+  height: 90px;
+}
+.cs-box-body,
+.cs-box-lid {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  border: 2px solid #5b1d22;
+  background: linear-gradient(#a8323a, #7d2229);
+}
+.cs-box-lid {
+  top: 12px;
+  height: 20px;
+  border-radius: 6px 6px 2px 2px;
+  background: linear-gradient(#c24650, #a8323a);
+  transform-origin: left bottom;
+  transition: transform 0.3s;
+}
+.cs-box.opening .cs-box-lid {
+  transform: rotate(-14deg) translateY(-4px);
+}
+.cs-box-body {
+  top: 32px;
+  height: 50px;
+  border-radius: 2px 2px 8px 8px;
+  display: grid;
+  place-items: center;
+}
+.cs-box-lantern {
+  font-size: 26px;
+  filter: drop-shadow(0 0 8px #ffb347);
+}
+
+.cs-roulette {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  height: 168px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.35);
+}
+.cs-strip {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 0;
+  list-style: none;
+  will-change: transform;
+}
+.cs-strip[data-speed="fast"] .cs-tile {
+  filter: blur(2.5px);
+}
+.cs-strip[data-speed="mid"] .cs-tile {
+  filter: blur(1px);
+}
+.cs-tile {
+  position: relative;
+  flex: none;
+  width: 124px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 4px 10px;
+  border-radius: 6px;
+  background: linear-gradient(to top, color-mix(in srgb, var(--r) 22%, #1f2430), #1f2430 70%);
+  overflow: hidden;
+}
+.cs-tile::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: var(--r);
+}
+.cs-tile .avatar,
+.cs-tile .icon3d {
+  max-width: 64px;
+}
+.cs-pic {
+  display: grid;
+  place-items: center;
+  height: 64px;
+}
+.cs-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.cs-slot {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.cs-tile.mystery {
+  background: radial-gradient(circle, #6b4a12, #2b2210);
+  box-shadow: inset 0 0 18px rgba(255, 179, 71, 0.45);
+}
+.cs-q {
+  font-size: 26px;
+  font-weight: bold;
+  color: var(--accent);
+  text-shadow: 0 0 10px #ffb347;
+}
+.cs-tile.won {
+  animation: cs-pop 0.5s ease-out both;
+  box-shadow:
+    0 0 0 2px var(--r),
+    0 0 22px var(--r);
+  z-index: 1;
+}
+@keyframes cs-pop {
+  0% {
+    transform: scale(1);
+  }
+  55% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1.06);
+  }
+}
+.cs-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  margin-left: -1.5px;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+  pointer-events: none;
+}
+.cs-marker::before,
+.cs-marker::after {
+  content: "";
+  position: absolute;
+  left: -6px;
+  border: 7px solid transparent;
+}
+.cs-marker::before {
+  top: 0;
+  border-top-color: var(--accent);
+}
+.cs-marker::after {
+  bottom: 0;
+  border-bottom-color: var(--accent);
+}
+/* The Nusantara case's pointer: a gunungan (the leaf-and-tree shape that opens a wayang show) in gold hung from
+   the top of a slim gold line, swaying once as the strip lands. The Night Market keeps its plain line and arrows. */
+.cs-roulette[data-case="nusantara"] .cs-marker {
+  width: 2px;
+  margin-left: -1px;
+  background: #f2b632;
+  box-shadow: 0 0 10px rgba(242, 182, 50, 0.6);
+}
+.cs-roulette[data-case="nusantara"] .cs-marker::before {
+  left: -13px;
+  width: 28px;
+  height: 40px;
+  border: 0;
+  transform-origin: 50% 0;
+  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 28'><path d='M10 1C13 8 18 12 18 19C18 24 14 27 10 27C6 27 2 24 2 19C2 12 7 8 10 1Z' fill='%235a3a1c' stroke='%23f2b632' stroke-width='1.6' stroke-linejoin='round'/><path d='M10 24V10M10 21L6.5 17.5M10 21L13.5 17.5M10 16.5L7 13.5M10 16.5L13 13.5' fill='none' stroke='%23f2b632' stroke-width='1.1' stroke-linecap='round'/><circle cx='6.2' cy='17' r='1' fill='%23ffd36a'/><circle cx='13.8' cy='17' r='1' fill='%23ffd36a'/><circle cx='10' cy='8.6' r='1' fill='%23ffd36a'/></svg>")
+    center / contain no-repeat;
+}
+.cs-roulette[data-case="nusantara"] .cs-marker::after {
+  display: none;
+}
+.cs-roulette[data-case="nusantara"].landed .cs-marker::before {
+  animation: cs-gunungan-sway 0.9s ease-out 1;
+}
+@keyframes cs-gunungan-sway {
+  0% {
+    transform: rotate(0);
+  }
+  25% {
+    transform: rotate(-7deg);
+  }
+  55% {
+    transform: rotate(4deg);
+  }
+  80% {
+    transform: rotate(-1.5deg);
+  }
+  100% {
+    transform: rotate(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cs-roulette[data-case="nusantara"].landed .cs-marker::before {
+    animation: none;
+  }
+}
+.cs-fade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 60px;
+  pointer-events: none;
+}
+.cs-fade.l {
+  left: 0;
+  background: linear-gradient(to right, var(--panel-solid), transparent);
+}
+.cs-fade.r {
+  right: 0;
+  background: linear-gradient(to left, var(--panel-solid), transparent);
+}
+
+.cs-reveal {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 2px solid var(--r);
+  background:
+    radial-gradient(circle at 12% 50%, color-mix(in srgb, var(--r) 35%, transparent), transparent 60%),
+    rgba(0, 0, 0, 0.25);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--r) 55%, transparent);
+  animation: cs-in 0.4s ease-out both;
+}
+@keyframes cs-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+}
+.cs-big {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 128px;
+  height: 128px;
+}
+.cs-big .avatar,
+.cs-big .icon3d {
+  transform: scale(2);
+  transform-origin: center;
+}
+.cs-reveal-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cs-reveal-text strong {
+  font-size: 20px;
+}
+.cs-rarity {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 12px;
+}
+
+.cs-contains {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cs-group h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.cs-group ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cs-group li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 4px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 3px solid var(--r);
+  text-align: center;
+}
+.cs-group .cs-q {
+  font-size: 22px;
+  padding: 18px 0 6px;
+}
+.cs-group li.mystery .cs-name {
+  white-space: normal;
+}
+.cs-group li.got {
+  box-shadow: 0 0 10px var(--r);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cs-tile.won,
+  .cs-reveal {
+    animation: none;
+  }
+  .cs-strip .cs-tile {
+    filter: none !important;
+  }
+}
+
+.cs-box-art {
+  width: 72px;
+  height: 84px;
+  image-rendering: pixelated;
+  flex: none;
+}
+
+/* Natmarked's case shop (CaseShop.tsx). Class names are cshop-*. */
+.cshop-pager {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "prev card next"
+    ". dots .";
+  column-gap: 10px;
+  row-gap: 10px;
+}
+.cshop-list {
+  grid-area: card;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  overflow: hidden;
+}
+.cshop-list > .cshop-card {
+  animation: cshop-slide 0.22s ease-out;
+}
+@keyframes cshop-slide {
+  from {
+    opacity: 0;
+    transform: translateX(calc(var(--dir, 1) * 28px));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cshop-list > .cshop-card {
+    animation: none;
+  }
+}
+.cshop-arrow {
+  align-self: start;
+  position: sticky;
+  top: 38%;
+  width: 48px;
+  height: 72px;
+  padding: 0;
+  font-size: 40px;
+  line-height: 1;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: linear-gradient(160deg, rgba(110, 34, 96, 0.32), rgba(20, 16, 28, 0.6));
+  color: inherit;
+  cursor: pointer;
+}
+.cshop-arrow:hover,
+.cshop-arrow:focus-visible {
+  border-color: #ffb347;
+  box-shadow: 0 0 12px rgba(255, 179, 71, 0.35);
+}
+.cshop-arrow.prev {
+  grid-area: prev;
+}
+.cshop-arrow.next {
+  grid-area: next;
+}
+.cshop-dots {
+  grid-area: dots;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+}
+.cshop-dot {
+  width: 14px;
+  height: 14px;
+  min-width: 0;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+}
+.cshop-dot[aria-current="true"] {
+  background: #ffb347;
+  border-color: #ffb347;
+  box-shadow: 0 0 8px rgba(255, 179, 71, 0.6);
+}
+.cshop-count {
+  margin-left: 6px;
+  font-variant-numeric: tabular-nums;
+}
+/* On a phone the arrows sit under the card, either side of the dots. */
+@media (max-width: 640px) {
+  .cshop-pager {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "card card card"
+      "prev dots next";
+  }
+  .cshop-arrow {
+    position: static;
+    align-self: center;
+    width: 56px;
+    height: 48px;
+  }
+  .cshop-top {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .cshop-card.locked {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+.cshop-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+  background: linear-gradient(160deg, rgba(110, 34, 96, 0.22), rgba(20, 16, 28, 0.4));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cshop-top {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+}
+.cshop-art {
+  flex: none;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 0 14px rgba(255, 179, 71, 0.45));
+}
+.cshop-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.cshop-main h3,
+.cshop-contains {
+  margin: 0;
+}
+.cshop-main p {
+  margin: 0;
+}
+.cshop-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.cshop-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 6px;
+}
+.cshop-items li {
+  display: grid;
+  grid-template-columns: 48px 1fr auto;
+  grid-template-areas: "pic name odds" "pic slot slot";
+  column-gap: 8px;
+  align-items: center;
+  padding: 4px 8px 4px 4px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--r, var(--line));
+}
+.cshop-items li > :first-child {
+  grid-area: pic;
+}
+.cshop-items li.mystery {
+  background: radial-gradient(circle at 24px 50%, #6b4a12, #2b2210 70%);
+}
+.cshop-items li.mystery .cs-q {
+  grid-area: pic;
+  justify-self: center;
+  font-size: 20px;
+}
+.cshop-items .cs-name {
+  grid-area: name;
+}
+.cshop-items .cs-slot {
+  grid-area: slot;
+}
+.cshop-odds {
+  grid-area: odds;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.cshop-card.locked {
+  flex-direction: row;
+  align-items: center;
+  gap: 18px;
+  opacity: 0.75;
+  border-style: dashed;
+}
+.cshop-silhouette {
+  flex: none;
+  width: 96px;
+  height: 84px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: radial-gradient(circle, rgba(155, 123, 255, 0.45), rgba(14, 10, 20, 0.9) 70%);
+  position: relative;
+}
+.cshop-silhouette::before {
+  content: "";
+  width: 54px;
+  height: 40px;
+  background: #0e0a14;
+  border-radius: 4px;
+  position: absolute;
+}
+.cshop-silhouette[data-shape="1"]::before {
+  width: 44px;
+  height: 52px;
+}
+.cshop-silhouette[data-shape="2"]::before {
+  width: 62px;
+  height: 28px;
+  border-radius: 14px 14px 4px 4px;
+}
+.cshop-silhouette span {
+  position: relative;
+  font-size: 18px;
+}
+
+.cs-box-wrap,
+.cshop-art-wrap {
+  display: contents;
+}
+
+/* Ragnarok Eve: a frost-blue strip, and a raven perched on the marker that hops while it spins. */
+.cs-roulette[data-case="ragnarok-eve"] {
+  border-color: #8fc4e0;
+  background: linear-gradient(180deg, rgba(31, 53, 80, 0.85), rgba(18, 30, 48, 0.9));
+  --accent: #cfe8f2;
+}
+.cs-roulette[data-case="ragnarok-eve"] .cs-marker {
+  background: #cfe8f2;
+  box-shadow: 0 0 10px #8fc4e0;
+}
+.cs-roulette[data-case="ragnarok-eve"] .cs-marker::before {
+  border-top-color: #cfe8f2;
+}
+.cs-roulette[data-case="ragnarok-eve"] .cs-marker::after {
+  border-bottom-color: #ff9a3c;
+}
+.cs-raven-wrap {
+  display: contents;
+}
+.cs-raven {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  margin-left: -12px;
+  image-rendering: pixelated;
+  pointer-events: none;
+  z-index: 2;
+}
+.cs-roulette.live .cs-raven {
+  animation: cs-raven-hop 0.34s steps(2, jump-none) infinite;
+}
+@keyframes cs-raven-hop {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-5px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cs-roulette.live .cs-raven {
+    animation: none;
+  }
+}

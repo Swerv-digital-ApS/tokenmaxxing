@@ -8,6 +8,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.129.0",
     "@tokenmaxxing/core": "workspace:*",
+    "hanzio": "^3.3.0",
     "rivetkit": "2.3.21"
   }
 }

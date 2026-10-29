@@ -1,24 +1,30 @@
 import { compact } from "@tokenmaxxing/core/format.ts";
+import { dateAt, type Keynote, type KeynoteInput } from "@tokenmaxxing/core/keynote.ts";
+import { PROVIDERS } from "@tokenmaxxing/core/launch.ts";
+import {
+  REQUEST_STATUSES,
+  type RequestEntry,
+  type RequestStatus,
+  STATUS_LABEL,
+} from "@tokenmaxxing/core/requests.ts";
+import { type Leader, makerOf, RANKING, type StatueAdmin } from "@tokenmaxxing/core/statue.ts";
 import { houseTierName } from "@tokenmaxxing/core/world.ts";
 import type { AdminCompany, AdminLogEntry, AdminOverview, AdminUser } from "@tokenmaxxing/server/registry";
+import { typedSwitch } from "hanzio";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import {
-  type AdminConn,
-  connectAdmin,
-  errorText,
-  forgetToken,
-  isUnauthorized,
-  savedToken,
-  saveToken,
-} from "./api.ts";
+import { errorText } from "../errors.ts";
+import { type AdminConn, connectAdmin, forgetToken, isUnauthorized, savedToken, saveToken } from "./api.ts";
 
-type Tab = "overview" | "users" | "companies" | "log";
+type Tab = "overview" | "users" | "companies" | "requests" | "keynotes" | "statue" | "log";
 type Act = (fn: () => Promise<unknown>, done: string) => Promise<void>;
 
 interface Data {
   overview: AdminOverview;
   users: AdminUser[];
   companies: AdminCompany[];
+  requests: RequestEntry[];
+  keynotes: Keynote[];
+  statue: StatueAdmin;
   log: AdminLogEntry[];
 }
 
@@ -84,13 +90,16 @@ function Console({ token, onSignOut }: { token: string; onSignOut: (reason: stri
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [overview, users, companies, log] = await Promise.all([
+      const [overview, users, companies, requests, keynotes, statue, log] = await Promise.all([
         conn.adminOverview(),
         conn.adminUsers(),
         conn.adminCompanies(),
+        conn.adminRequests(),
+        conn.adminKeynotes(),
+        conn.adminStatue(),
         conn.adminLog(),
       ]);
-      setData({ overview, users, companies, log });
+      setData({ overview, users, companies, requests, keynotes, statue, log });
     } catch (err) {
       if (isUnauthorized(err)) onSignOut("That token didn't work.");
       else setMessage({ text: errorText(err), bad: true });
@@ -114,6 +123,9 @@ function Console({ token, onSignOut }: { token: string; onSignOut: (reason: stri
     ["overview", "Overview"],
     ["users", `Users${data ? ` (${data.users.length})` : ""}`],
     ["companies", `Companies${data ? ` (${data.companies.length})` : ""}`],
+    ["requests", `Requests${data ? ` (${data.requests.filter((r) => r.status === "open").length})` : ""}`],
+    ["keynotes", `Keynotes${data ? ` (${data.keynotes.filter((k) => k.endsAt > Date.now()).length})` : ""}`],
+    ["statue", "Statue"],
     ["log", "Log"],
   ];
   return (
@@ -147,14 +159,16 @@ function Console({ token, onSignOut }: { token: string; onSignOut: (reason: stri
       <main>
         {!data ? (
           <p className="muted">{loading ? "Loading…" : "Nothing yet."}</p>
-        ) : tab === "overview" ? (
-          <Overview o={data.overview} />
-        ) : tab === "users" ? (
-          <Users users={data.users} conn={conn} act={act} />
-        ) : tab === "companies" ? (
-          <Companies companies={data.companies} conn={conn} act={act} />
         ) : (
-          <Log log={data.log} />
+          typedSwitch(tab, {
+            overview: () => <Overview o={data.overview} />,
+            users: () => <Users users={data.users} conn={conn} act={act} />,
+            companies: () => <Companies companies={data.companies} conn={conn} act={act} />,
+            requests: () => <Requests requests={data.requests} conn={conn} act={act} />,
+            keynotes: () => <Keynotes keynotes={data.keynotes} conn={conn} act={act} />,
+            statue: () => <Statue s={data.statue} conn={conn} act={act} />,
+            log: () => <Log log={data.log} />,
+          })
         )}
       </main>
     </>
@@ -208,15 +222,14 @@ function Table<T extends { id: number }>({
   initial: number;
 }) {
   const [by, setBy] = useState({ col: initial, desc: true });
-  const sorted = useMemo(() => {
-    const key = columns[by.col]?.sort;
-    if (!key) return rows;
-    return [...rows].sort((a, b) => {
-      const [x, y] = [key(a), key(b)];
-      const d = x < y ? -1 : x > y ? 1 : 0;
-      return by.desc ? -d : d;
-    });
-  }, [rows, columns, by]);
+  const key = columns[by.col]?.sort;
+  const sorted = !key
+    ? rows
+    : [...rows].sort((a, b) => {
+        const [x, y] = [key(a), key(b)];
+        const d = x < y ? -1 : x > y ? 1 : 0;
+        return by.desc ? -d : d;
+      });
   return (
     <div className="scroll">
       <table>
@@ -266,6 +279,12 @@ const date = (ms: number) => new Date(ms).toLocaleDateString(undefined, { dateSt
 const matches = (q: string, ...texts: (string | number | null | undefined)[]) =>
   !q || texts.some((t) => t != null && String(t).toLowerCase().includes(q.toLowerCase()));
 
+/** A new name for `name`, asked for; null when cancelled or the same. */
+function askName(name: string): string | null {
+  const next = window.prompt(`New name for ${name}:`, name)?.trim();
+  return next && next !== name ? next : null;
+}
+
 /** Asks for the name again before something that can't be undone. */
 const confirmName = (what: string, name: string) =>
   window.prompt(`${what}\n\nThis can't be undone. Type "${name}" to go ahead.`)?.trim() === name;
@@ -289,6 +308,23 @@ function Users({ users, conn, act }: { users: AdminUser[]; conn: AdminConn; act:
           </>
         ) : (
           <span className="muted">—</span>
+        ),
+    },
+    {
+      label: "Bio",
+      sort: (u) => u.bioReports,
+      cell: (u) =>
+        u.bio ? (
+          <>
+            {u.bio}
+            {u.bioReports > 0 && (
+              <span className="tag bad" title="People who reported this bio">
+                ⚑ {u.bioReports}
+              </span>
+            )}
+          </>
+        ) : (
+          ""
         ),
     },
     { label: "Lvl", num: true, sort: (u) => u.level, cell: (u) => u.level },
@@ -337,13 +373,23 @@ function Users({ users, conn, act }: { users: AdminUser[]; conn: AdminConn; act:
           <button
             type="button"
             onClick={() => {
-              const name = window.prompt(`New name for ${u.name}:`, u.name)?.trim();
-              if (name && name !== u.name)
-                void act(() => conn.adminRenameUser(u.id, name), `Renamed to ${name}.`);
+              const name = askName(u.name);
+              if (name) void act(() => conn.adminRenameUser(u.id, name), `Renamed to ${name}.`);
             }}
           >
             Rename
           </button>
+          {u.bio && (
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm(`Clear ${u.name}'s bio?`))
+                  void act(() => conn.adminClearBio(u.id), `Cleared ${u.name}'s bio.`);
+              }}
+            >
+              Clear bio
+            </button>
+          )}
           {u.company && (
             <button
               type="button"
@@ -468,6 +514,23 @@ function Companies({ companies, conn, act }: { companies: AdminCompany[]; conn: 
     { label: "Today", num: true, sort: (c) => c.tokensToday, cell: (c) => compact(c.tokensToday) },
     { label: "30 days", num: true, sort: (c) => c.tokens30d, cell: (c) => compact(c.tokens30d) },
     {
+      label: "Wallet",
+      num: true,
+      sort: (c) => c.wallet,
+      cell: (c) => (
+        <Coins
+          key={c.wallet}
+          balance={c.wallet}
+          onSave={(n) =>
+            act(
+              () => conn.adminSetCompanyCoins(c.id, n),
+              `${c.name}'s wallet has 🪙 ${n.toLocaleString()} now.`,
+            )
+          }
+        />
+      ),
+    },
+    {
       label: "Website",
       sort: (c) => c.website ?? "",
       cell: (c) =>
@@ -493,9 +556,8 @@ function Companies({ companies, conn, act }: { companies: AdminCompany[]; conn: 
           <button
             type="button"
             onClick={() => {
-              const name = window.prompt(`New name for ${c.name}:`, c.name)?.trim();
-              if (name && name !== c.name)
-                void act(() => conn.adminRenameCompany(c.id, name), `Renamed to ${name}.`);
+              const name = askName(c.name);
+              if (name) void act(() => conn.adminRenameCompany(c.id, name), `Renamed to ${name}.`);
             }}
           >
             Rename
@@ -528,6 +590,263 @@ function Companies({ companies, conn, act }: { companies: AdminCompany[]; conn: 
         onChange={(e) => setQ(e.target.value)}
       />
       <Table rows={rows} columns={columns} initial={7} />
+    </>
+  );
+}
+
+// MARK: Requests
+
+/** The Tavern's request pile: by 👍, with the status the builders give each (`Planned` is shown to everyone). */
+function Requests({ requests, conn, act }: { requests: RequestEntry[]; conn: AdminConn; act: Act }) {
+  const columns: Column<RequestEntry>[] = [
+    { label: "👍", num: true, sort: (r) => r.votes, cell: (r) => r.votes },
+    { label: "Request", cell: (r) => r.text },
+    { label: "By", sort: (r) => r.name, cell: (r) => r.name },
+    { label: "Posted", sort: (r) => r.createdAt, cell: (r) => date(r.createdAt) },
+    {
+      label: "Status",
+      sort: (r) => r.status,
+      cell: (r) => (
+        <select
+          aria-label={`Status of "${r.text}"`}
+          value={r.status}
+          onChange={(e) =>
+            void act(
+              () => conn.adminSetRequest(r.id, e.target.value as RequestStatus),
+              `Marked it ${STATUS_LABEL[e.target.value as RequestStatus]}.`,
+            )
+          }
+        >
+          {REQUEST_STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {STATUS_LABEL[s]}
+            </option>
+          ))}
+        </select>
+      ),
+    },
+    {
+      label: "",
+      cell: (r) => (
+        <button
+          type="button"
+          onClick={() => {
+            if (confirm(`Take down "${r.text}"?`))
+              void act(() => conn.adminRemoveRequest(r.id), "Taken down.");
+          }}
+        >
+          Remove
+        </button>
+      ),
+    },
+  ];
+  return <Table rows={requests} columns={columns} initial={0} />;
+}
+
+// MARK: Statue
+
+const leaderLine = (l: Leader) => `${l.model} · ${makerOf(l).name} · ${l.ranking}`;
+
+/** The statue of the #1 model on the square: what's on it, what the ranking last said, and a pin over it. */
+function Statue({ s, conn, act }: { s: StatueAdmin; conn: AdminConn; act: Act }) {
+  const [model, setModel] = useState("");
+  const [maker, setMaker] = useState("");
+  const [ranking, setRanking] = useState("");
+  const pin = (e: FormEvent) => {
+    e.preventDefault();
+    void act(() => conn.adminPinStatue(model, maker, ranking), `${model.trim()} is on the plinth.`);
+  };
+  const tiles: [string, string, string?][] = [
+    [
+      "On the plinth",
+      s.shown.leader ? s.shown.leader.model : "Nothing yet (draped)",
+      s.shown.leader
+        ? `${makerOf(s.shown.leader).name} · ${s.shown.pinned ? "pinned" : "from the ranking"}`
+        : "",
+    ],
+    [
+      "Ranking says",
+      s.read ? s.read.leader.model : "Not read yet",
+      s.read ? `${leaderLine(s.read.leader)}${s.read.leader.asOf ? `, ${s.read.leader.asOf}` : ""}` : "",
+    ],
+    ["Next read", s.nextAt ? new Date(s.nextAt).toLocaleString() : "Soon"],
+  ];
+  return (
+    <>
+      <div className="tiles">
+        {tiles.map(([label, value, sub]) => (
+          <div key={label} className="tile">
+            <div className="muted">{label}</div>
+            <div className="value">{value}</div>
+            {sub && <div className="muted small">{sub}</div>}
+          </div>
+        ))}
+      </div>
+      <form className="pin" onSubmit={pin}>
+        <h2>Pin a model</h2>
+        <p className="muted small">
+          It stays on the plinth over the ranking's until you unpin it. A provider's name gets its colour.
+        </p>
+        <input placeholder="Model" value={model} maxLength={48} onChange={(e) => setModel(e.target.value)} />
+        <input
+          placeholder="Made by"
+          list="statue-makers"
+          value={maker}
+          maxLength={32}
+          onChange={(e) => setMaker(e.target.value)}
+        />
+        <datalist id="statue-makers">
+          {PROVIDERS.map((p) => (
+            <option key={p.id} value={p.name} />
+          ))}
+        </datalist>
+        <input
+          placeholder={RANKING}
+          value={ranking}
+          maxLength={48}
+          onChange={(e) => setRanking(e.target.value)}
+        />
+        <div className="actions">
+          <button type="submit" className="primary" disabled={!model.trim() || !maker.trim()}>
+            Pin
+          </button>
+          {s.pin && (
+            <button
+              type="button"
+              onClick={() => void act(() => conn.adminUnpinStatue(), "The ranking has the plinth again.")}
+            >
+              Unpin {s.pin.leader.model}
+            </button>
+          )}
+        </div>
+      </form>
+    </>
+  );
+}
+
+// MARK: Keynotes
+
+/** `ms` as a `datetime-local` input's value, in this browser's time zone. */
+const localInput = (ms: number) => {
+  const d = new Date(ms);
+  return new Date(ms - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+};
+
+const NO_KEYNOTE = { title: "", host: "", start: "", end: "", url: "" };
+
+/**
+ * The keynote watch parties (`core/src/keynote.ts`): schedule one (title, host, start and end in this browser's
+ * time, the stream's link), change or remove one. The Tavern's screen goes down while it's on.
+ */
+function Keynotes({ keynotes, conn, act }: { keynotes: Keynote[]; conn: AdminConn; act: Act }) {
+  const [editing, setEditing] = useState<number | null>(null);
+  const [form, setForm] = useState(NO_KEYNOTE);
+  const set = (k: keyof typeof NO_KEYNOTE) => (e: { target: { value: string } }) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+  const edit = (k: Keynote) => {
+    setEditing(k.id);
+    setForm({
+      title: k.title,
+      host: k.host,
+      start: localInput(k.startsAt),
+      end: localInput(k.endsAt),
+      url: k.url,
+    });
+  };
+  const reset = () => {
+    setEditing(null);
+    setForm(NO_KEYNOTE);
+  };
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    const input: KeynoteInput = {
+      title: form.title,
+      host: form.host,
+      startsAt: new Date(form.start).getTime(),
+      endsAt: new Date(form.end).getTime(),
+      url: form.url,
+    };
+    void act(
+      async () => {
+        await conn.adminSaveKeynote(editing, input);
+        reset();
+      },
+      editing === null ? `Scheduled ${form.title}.` : `Changed ${form.title}.`,
+    );
+  };
+  const now = Date.now();
+  const columns: Column<Keynote>[] = [
+    {
+      label: "",
+      sort: (k) => k.startsAt,
+      cell: (k) =>
+        k.endsAt <= now ? <span className="muted">over</span> : k.startsAt <= now ? "🔴 live" : "soon",
+    },
+    { label: "Keynote", sort: (k) => k.title, cell: (k) => <strong>{k.title}</strong> },
+    { label: "Host", sort: (k) => k.host, cell: (k) => k.host },
+    { label: "Starts (Copenhagen)", sort: (k) => k.startsAt, cell: (k) => dateAt(k.startsAt) },
+    { label: "Ends", sort: (k) => k.endsAt, cell: (k) => dateAt(k.endsAt) },
+    {
+      label: "Stream",
+      cell: (k) => (
+        <a href={k.url} target="_blank" rel="noreferrer">
+          {new URL(k.url).hostname}
+        </a>
+      ),
+    },
+    {
+      label: "",
+      cell: (k) => (
+        <div className="actions">
+          <button type="button" onClick={() => edit(k)}>
+            Edit
+          </button>
+          <button
+            type="button"
+            className="danger"
+            onClick={() => {
+              if (confirm(`Take ${k.title} off the schedule?`))
+                void act(() => conn.adminRemoveKeynote(k.id), `Removed ${k.title}.`);
+            }}
+          >
+            Remove
+          </button>
+        </div>
+      ),
+    },
+  ];
+  return (
+    <>
+      <form className="keynote-form" onSubmit={submit}>
+        <input required placeholder="Title (OpenAI DevDay)" value={form.title} onChange={set("title")} />
+        <input required placeholder="Host (OpenAI)" value={form.host} onChange={set("host")} />
+        <label>
+          Starts <input required type="datetime-local" value={form.start} onChange={set("start")} />
+        </label>
+        <label>
+          Ends <input required type="datetime-local" value={form.end} onChange={set("end")} />
+        </label>
+        <input
+          required
+          type="url"
+          placeholder="https://… (the livestream)"
+          value={form.url}
+          onChange={set("url")}
+        />
+        <button type="submit" className="primary">
+          {editing === null ? "Schedule" : "Save"}
+        </button>
+        {editing !== null && (
+          <button type="button" onClick={reset}>
+            Cancel
+          </button>
+        )}
+      </form>
+      <p className="muted small">
+        Times are this browser's ({Intl.DateTimeFormat().resolvedOptions().timeZone}). The Tavern puts up a
+        poster a week before, and the screen goes down while it's on.
+      </p>
+      <Table rows={keynotes} columns={columns} initial={3} />
     </>
   );
 }

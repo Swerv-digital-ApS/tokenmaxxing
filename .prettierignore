@@ -1,0 +1,4 @@
+# Generated: vendored LiteLLM prices (bun run vendor:pricing) and release-please's files.
+server/src/pricing-fallback.json
+.release-please-manifest.json
+CHANGELOG.md

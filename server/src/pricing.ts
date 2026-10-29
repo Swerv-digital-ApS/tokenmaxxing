@@ -97,6 +97,8 @@ const FETCH_TIMEOUT_MS = 30_000;
 
 export class PricingCache {
   private map: Map<string, ModelPrice>;
+  /** `lookup`'s answers past the map's own names, misses too: every board prices every model again. */
+  private found = new Map<string, ModelPrice | null>();
 
   constructor() {
     this.map = buildMap(FALLBACK_RAW);
@@ -115,6 +117,7 @@ export class PricingCache {
       const next = buildMap(json);
       // Atomic swap.
       this.map = next;
+      this.found = new Map();
       return { updated: next.size, failed: false };
     } catch {
       return { updated: this.map.size, failed: true };
@@ -126,6 +129,16 @@ export class PricingCache {
     const key = model.toLowerCase();
     const direct = this.map.get(key);
     if (direct) return direct;
+    const known = this.found.get(key);
+    if (known !== undefined) return known;
+    const price = this.match(key);
+    // Names come from people's machines: a flood of made-up ones only empties it.
+    if (this.found.size >= 10_000) this.found.clear();
+    this.found.set(key, price);
+    return price;
+  }
+
+  private match(key: string): ModelPrice | null {
     const candidates = [key];
     for (const prefix of COMMON_PREFIXES) {
       if (key.startsWith(prefix)) candidates.push(key.slice(prefix.length));

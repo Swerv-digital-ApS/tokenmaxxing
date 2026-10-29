@@ -10,6 +10,9 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
+// Preview installers have no published, signed Linux/Windows update feed yet.
+pub const SUPPORTED: bool = cfg!(target_os = "macos");
+
 const EVERY: Duration = Duration::from_secs(60 * 60);
 /// Left behind by an update installed with the game open, so the game opens again after the restart.
 const REOPEN: &str = "reopen-world";
@@ -33,7 +36,7 @@ pub struct Shown {
 }
 
 pub fn watch(app: AppHandle) {
-    if cfg!(debug_assertions) {
+    if cfg!(debug_assertions) || !SUPPORTED {
         return;
     }
     std::thread::spawn(move || loop {
@@ -44,6 +47,9 @@ pub fn watch(app: AppHandle) {
 
 /// "Check for updates…" checks now; "Update to X.Y.Z…" installs it and restarts.
 pub fn from_menu(app: &AppHandle) {
+    if !SUPPORTED {
+        return;
+    }
     if !install_now(app) {
         let app = app.clone();
         tauri::async_runtime::spawn(async move { check(&app).await });

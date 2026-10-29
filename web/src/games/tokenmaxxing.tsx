@@ -1,5 +1,6 @@
 import { clock, compact } from "@tokenmaxxing/core/format.ts";
 import type { TokenmaxxingView } from "@tokenmaxxing/core/games/tokenmaxxing.ts";
+import { clamp, sortBy, typedSwitch } from "hanzio";
 import { AvatarImage } from "../hud/ui.tsx";
 import type { GameProps } from "./types.ts";
 
@@ -13,7 +14,7 @@ function lastMinute(points: [number, number][], now: number): number {
 }
 
 export function Tokenmaxxing({ view, you, now, name, look }: GameProps<TokenmaxxingView>) {
-  const ranked = [...view.players].sort((a, b) => (view.tokens[b] ?? 0) - (view.tokens[a] ?? 0));
+  const ranked = sortBy(view.players, { by: (p) => view.tokens[p] ?? 0, order: "desc" });
   const top = Math.max(1, view.tokens[ranked[0]!] ?? 0);
   const color = (p: number) => COLORS[view.players.indexOf(p) % COLORS.length]!;
   const minutes = Math.max(1, (Math.min(now, view.endsAt) - view.startsAt) / 60_000);
@@ -25,13 +26,12 @@ export function Tokenmaxxing({ view, you, now, name, look }: GameProps<Tokenmaxx
   return (
     <div className="tmx">
       <p className="tmx-clock">
-        {view.phase === "countdown"
-          ? `🏁 Starts in ${clock(view.startsAt - now)}: fire up your agents`
-          : view.phase === "live"
-            ? `⏱ ${clock(view.endsAt - now)} left`
-            : view.phase === "grace"
-              ? `⏳ Counting the last tokens… ${clock(view.graceUntil - now)}`
-              : "🏁 Final"}
+        {typedSwitch(view.phase, {
+          countdown: () => `🏁 Starts in ${clock(view.startsAt - now)}: fire up your agents`,
+          live: () => `⏱ ${clock(view.endsAt - now)} left`,
+          grace: () => `⏳ Counting the last tokens… ${clock(view.graceUntil - now)}`,
+          over: () => "🏁 Final",
+        })}
       </p>
       {view.phase === "live" && surge && (
         <p className="tmx-surge">
@@ -76,7 +76,7 @@ const H = 110;
 /** Cumulative tokens per player over the battle, as plain SVG. */
 function Chart({ view, color, now }: { view: TokenmaxxingView; color: (p: number) => string; now: number }) {
   const span = view.endsAt - view.startsAt;
-  const until = Math.min(Math.max(now, view.startsAt), view.endsAt);
+  const until = clamp(now, view.startsAt, view.endsAt);
   const top = Math.max(1, ...Object.values(view.tokens));
   const x = (t: number) => ((Math.min(t, view.endsAt) - view.startsAt) / span) * W;
   const y = (n: number) => H - (n / top) * (H - 4);

@@ -34,7 +34,7 @@ export async function reportUsageDays(
 }
 
 /** Reports the oldest pending days, a week at most; false once none are left. */
-export async function flushUsageBatch(sql: Sql, report: (days: string[]) => Promise<void>): Promise<boolean> {
+async function flushUsageBatch(sql: Sql, report: (days: string[]) => Promise<void>): Promise<boolean> {
   const rows = (await sql.execute("SELECT day FROM pending_usage_days ORDER BY day LIMIT 7")) as {
     day: string;
   }[];

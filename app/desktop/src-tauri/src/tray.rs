@@ -6,7 +6,6 @@ use crate::helper::{Helper, State};
 use crate::updates::{self, Status};
 use crate::{world, Shared};
 use serde_json::json;
-use std::io::Write;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::image::Image;
@@ -14,15 +13,20 @@ use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuEvent, MenuItem, Predefin
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, Wry};
 use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_opener::OpenerExt;
 
 const ID: &str = "main";
 
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
     TrayIconBuilder::with_id(ID)
-        .icon(Image::from_bytes(include_bytes!("../icons/tray.png"))?)
+        .icon(Image::from_bytes(if cfg!(target_os = "macos") {
+            include_bytes!("../icons/tray.png")
+        } else {
+            include_bytes!("../icons/32x32.png")
+        })?)
         // Black on clear, so macOS tints it for light and dark menu bars.
-        .icon_as_template(true)
+        .icon_as_template(cfg!(target_os = "macos"))
         .tooltip("Tokenmaxxing")
         .menu(&menu(app)?)
         .show_menu_on_left_click(true)
@@ -37,6 +41,10 @@ pub fn refresh(app: &AppHandle) {
         return;
     };
     let title = title(&app.state::<Shared>().lock().unwrap().state);
+    let _ = tray.set_tooltip(Some(match &title {
+        Some(tokens) => format!("Tokenmaxxing · {tokens} today"),
+        None => "Tokenmaxxing".to_string(),
+    }));
     let _ = tray.set_title(title);
     match menu(app) {
         Ok(menu) => {
@@ -104,12 +112,16 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         at_login,
         None::<&str>,
     )?));
-    let (update_text, update_enabled) = match &ui.update {
-        Status::Unknown => ("Check for updates…".to_string(), true),
-        Status::Checking => ("Checking for updates…".to_string(), false),
-        Status::Current => ("Tokenmaxxing is up to date".to_string(), true),
-        Status::Available(update) => (format!("Update to {}…", update.version), true),
-        Status::Installing => ("Installing the update…".to_string(), false),
+    let (update_text, update_enabled) = if !updates::SUPPORTED {
+        ("Updates unavailable in preview".to_string(), false)
+    } else {
+        match &ui.update {
+            Status::Unknown => ("Check for updates…".to_string(), true),
+            Status::Checking => ("Checking for updates…".to_string(), false),
+            Status::Current => ("Tokenmaxxing is up to date".to_string(), true),
+            Status::Available(update) => (format!("Update to {}…", update.version), true),
+            Status::Installing => ("Installing the update…".to_string(), false),
+        }
     };
     items.push(Box::new(item(
         "update",
@@ -146,7 +158,7 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
             std::thread::spawn(move || {
                 match helper
                     .call(json!({ "cmd": "linkComputer" }))
-                    .and_then(|r| copy(r["command"].as_str().unwrap_or_default()))
+                    .and_then(|r| copy(&app, r["command"].as_str().unwrap_or_default()))
                 {
                     Ok(()) => {
                         app.state::<Shared>().lock().unwrap().link_copied_until =
@@ -173,7 +185,7 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
         "github" => {
             let problem = app.state::<Shared>().lock().unwrap().state.github.clone();
             if problem.as_deref() == Some("signed_out") {
-                if let Err(e) = copy("gh auth login") {
+                if let Err(e) = copy(app, "gh auth login") {
                     log::warn!("copy gh auth login: {e}");
                 }
             } else if let Err(e) = app
@@ -193,22 +205,11 @@ fn on_menu(app: &AppHandle, event: MenuEvent) {
 const LINK_CODE_LIFE: Duration = Duration::from_secs(10 * 60);
 
 /// Puts `text` on the clipboard.
-fn copy(text: &str) -> Result<(), String> {
+fn copy(app: &AppHandle, text: &str) -> Result<(), String> {
     if text.is_empty() {
         return Err("nothing to copy".into());
     }
-    let mut child = std::process::Command::new("/usr/bin/pbcopy")
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    child
-        .stdin
-        .take()
-        .ok_or("no stdin")?
-        .write_all(text.as_bytes())
-        .map_err(|e| e.to_string())?;
-    child.wait().map_err(|e| e.to_string())?;
-    Ok(())
+    app.clipboard().write_text(text).map_err(|e| e.to_string())
 }
 
 fn today_line(state: &State) -> Option<String> {
@@ -245,6 +246,8 @@ fn source_lines(state: &State) -> Vec<String> {
                 // The CLI, the Codex app and Codex in the ChatGPT app.
                 "codex" => "Codex",
                 "cursor_local" => "Cursor",
+                // Cursor dashboard rows for grok-bot* cloud agents.
+                "grok_bot" => "Grok Bot",
                 other => other,
             };
             format!("   {name} · {}", compact(s.tokens))
@@ -357,6 +360,10 @@ mod tests {
                         tokens: 56_000_000.0,
                     },
                     SourceTokens {
+                        source: "grok_bot".into(),
+                        tokens: 12_000_000.0,
+                    },
+                    SourceTokens {
                         source: "github".into(),
                         tokens: 0.0,
                     },
@@ -383,6 +390,7 @@ mod tests {
             [
                 "   Claude Code · 250.0M",
                 "   Codex · 56.0M",
+                "   Grok Bot · 12.0M",
                 "   Pull requests · 3"
             ]
         );

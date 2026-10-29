@@ -85,18 +85,49 @@ describe("ingest", () => {
     expect((await u.town.profile(u.userId, "7d")).totals.tokens).toBe(300);
   });
 
-  test("older clients cannot add excluded Cursor bots to personal usage", async () => {
+  test("Grok Bot rows count once as grok_bot, including when an older client still tags them as Cursor", async () => {
     const u = await signUp("bots");
     const player = as(u.token).player(u.userId);
+    const now = Date.now();
     await player.ingest([
-      event({ source: "cursor_local", model: "grok-bot-automation", inputTokens: 1000 }),
-      event({ source: "cursor_local", model: "grok-bot-default", inputTokens: 1000, costCents: 500 }),
-      event({ source: "cursor_local", model: "grok-bot-cua", inputTokens: 1000, costCents: 500 }),
-      event({ source: "cursor_local", model: "grok-4.7-high", inputTokens: 10, outputTokens: 0 }),
+      event({
+        timestamp: now,
+        source: "cursor_local",
+        model: "grok-bot-automation",
+        messageId: "cursor-api:bot:0",
+        inputTokens: 1000,
+        outputTokens: 0,
+        costCents: 500,
+      }),
+      // Same dashboard row from a client that already labels it grok_bot: one stored event.
+      event({
+        timestamp: now,
+        source: "grok_bot",
+        model: "grok-bot-automation",
+        messageId: "cursor-api:bot:0",
+        inputTokens: 1000,
+        outputTokens: 0,
+        costCents: 500,
+      }),
+      event({
+        timestamp: now,
+        source: "cursor_local",
+        model: "grok-4.7-high",
+        inputTokens: 10,
+        outputTokens: 0,
+      }),
     ]);
+    expect(await player.todayBySource()).toEqual({
+      sources: [
+        { source: "grok_bot", tokens: 1000 },
+        { source: "cursor_local", tokens: 10 },
+      ],
+      prs: 0,
+    });
     const profile = await u.town.profile(u.userId, "all");
-    expect(profile.totals.tokens).toBe(10);
-    expect(profile.models.map((m) => m.model)).toEqual(["grok-4.7-high"]);
+    expect(profile.totals.tokens).toBe(1010);
+    expect(profile.totals.costUsd).toBe(5);
+    expect(profile.models.map((m) => m.model).sort()).toEqual(["grok-4.7-high", "grok-bot-automation"]);
   });
 
   test("Cursor reported costs enrich old events without duplicating tokens, and accept corrections", async () => {

@@ -1,7 +1,7 @@
 {
   "name": "tokenmaxxing",
-  "version": "1.4.2",
-  "packageManager": "bun@1.4.2",
+  "version": "1.15.0",
+  "packageManager": "bun@1.4.4",
   "private": true,
   "description": "A tiny pixel town for people who run AI coding agents, with a macOS menu bar app that syncs your token usage",
   "license": "MIT",
@@ -30,19 +30,23 @@
     "app/helper"
   ],
   "scripts": {
-    "dev": "bun run site:build && RIVETKIT_STORAGE_PATH=.data/rivet RIVET_LOG_LEVEL=error bun --watch server/src/main.ts",
+    "dev": "bun run site:build && RIVETKIT_STORAGE_PATH=.data/rivet RIVET_LOG_LEVEL=error RIVET__GUARD__TCP_NODELAY=true bun --watch server/src/main.ts",
     "dev:seed": "bun server/scripts/dev-seed.ts",
     "desktop:dev": "cd app/desktop && tauri dev",
     "desktop:build": "cd app/desktop && tauri build",
     "helper:once": "bun app/helper/src/main.ts --once",
-    "test": "bun test --timeout 60000",
-    "typecheck": "tsc -p core && tsc -p server && tsc -p web && tsc -p app/helper",
-    "lint": "biome ci .",
-    "format": "biome check --write .",
+    "test": "bun test --timeout 60000 --parallel=12",
+    "typecheck": "bun check --no-script -p core && bun check --no-script -p server && bun check --no-script -p web && bun check --no-script -p app/helper",
+    "lint": "biome ci . && bun fmt --no-script --check '**/*.{ts,tsx,mjs,json,css}'",
+    "fmt": "bun fmt --no-script '**/*.{ts,tsx,mjs,json,css}'",
+    "format": "biome check --write . && bun run fmt",
     "check": "bun run typecheck && bun run lint && bun run test",
     "vendor:pricing": "bun server/scripts/vendor-pricing.ts",
     "site:dev": "bun run --cwd site dev",
-    "site:build": "bun run --cwd site build"
+    "site:build": "bun run --cwd site build",
+    "qa:tour": "bun scripts/qa/tour.mjs",
+    "qa:sleep": "bun scripts/qa/sleep.mjs",
+    "qa:hitch": "bun scripts/qa/hitch.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",

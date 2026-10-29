@@ -26,13 +26,18 @@ body {
   font: 13px / 1.4 var(--font);
 }
 
-#world {
+#stage > canvas {
+  /* Fingers on the world are the game's (tap to walk, pinch to zoom), not the page's. */
+  touch-action: none;
   position: fixed;
   inset: 0;
   width: 100vw;
   height: 100vh;
-  image-rendering: pixelated;
   cursor: pointer;
+}
+
+#world {
+  image-rendering: pixelated;
 }
 
 #hud {
@@ -45,8 +50,14 @@ body {
   pointer-events: auto;
 }
 
+#hud > .picnic-banner,
+#hud > .green-banner {
+  pointer-events: none;
+}
+
 button,
-input {
+input,
+textarea {
   font: inherit;
   color: inherit;
 }
@@ -63,7 +74,8 @@ button:hover {
   background: rgba(255, 255, 255, 0.16);
 }
 
-input {
+input,
+textarea {
   background: rgba(0, 0, 0, 0.35);
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -71,7 +83,8 @@ input {
   outline: none;
 }
 
-input:focus {
+input:focus,
+textarea:focus {
   border-color: var(--accent);
 }
 
@@ -173,6 +186,29 @@ input:focus {
   padding: 6px;
 }
 
+.photo-booth {
+  position: fixed;
+  top: 62px;
+  right: 12px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(300px, calc(100vw - 24px));
+  padding: 12px;
+}
+
+.chip.sky {
+  cursor: help;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.chip.sky .sep {
+  margin: 0 6px;
+  opacity: 0.5;
+}
+
 .chip strong {
   color: var(--accent);
 }
@@ -200,6 +236,17 @@ input:focus {
 .badge.lv {
   background: rgba(143, 227, 255, 0.15);
   color: var(--good);
+}
+
+/* The player card's badges: a wrapping row of `.badge` chips (the -6px undoes the first one's margin). */
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  margin: 4px 0 4px -6px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
 }
 
 .banner {
@@ -237,12 +284,32 @@ input:focus {
   border-radius: 8px;
 }
 
+/* Toasts that can show at once go in one column, so none covers another. */
+#hud > .toasts {
+  position: absolute;
+  top: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.toasts > .toast {
+  pointer-events: auto;
+  position: static;
+  transform: none;
+}
+
 .dialog {
   position: absolute;
   left: 50%;
   bottom: 24px;
   transform: translateX(-50%);
-  width: min(560px, calc(100vw - 700px));
+  /* Clear of the chat dock (400px + margins) on the left, as wide on the right. */
+  width: min(560px, calc(100vw - 880px));
   min-width: 280px;
   font-size: 14px;
   background: rgba(251, 247, 239, 0.97);
@@ -250,8 +317,100 @@ input:focus {
   border: 3px solid var(--ink);
 }
 
-/* Chat dock, bottom left. */
-/* The chat and the quick replies above it, stacked from the bottom-left corner. */
+/* Above the dialog's place: what G and M do to the piece you face. */
+.piece-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  font-size: 13px;
+  background: rgba(251, 247, 239, 0.97);
+  color: var(--ink);
+  border: 3px solid var(--ink);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+@media (max-width: 1150px) {
+  .piece-hint {
+    bottom: 230px;
+  }
+  .dialog {
+    bottom: 230px;
+  }
+}
+
+/* In your own office: what you can put down, a slot a kind along the bottom (Minecraft's hotbar). */
+.hotbar {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.5);
+}
+
+.hotbar .slot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.hotbar .slot.on {
+  background: rgba(255, 211, 92, 0.25);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.hotbar .slot.more {
+  font-weight: 700;
+}
+
+.hotbar .key,
+.hotbar .n {
+  position: absolute;
+  font-size: 11px;
+  text-shadow: 1px 1px 0 #000;
+  pointer-events: none;
+}
+
+.hotbar .key {
+  top: 2px;
+  left: 4px;
+  opacity: 0.7;
+}
+
+.hotbar .n {
+  right: 4px;
+  bottom: 2px;
+  font-weight: 700;
+}
+
+/* The dialog and the piece hint stand on the bar, not over it. */
+.hotbar ~ .dialog,
+.hotbar ~ .piece-hint {
+  bottom: 92px;
+}
+
+@media (max-width: 1150px) {
+  .hotbar {
+    bottom: 230px;
+  }
+  .hotbar ~ .dialog,
+  .hotbar ~ .piece-hint {
+    bottom: 310px;
+  }
+}
+
+/* The chat dock: the chat and the quick replies above it, stacked from the bottom-left corner. */
 .chat-dock {
   position: absolute;
   left: 12px;
@@ -268,8 +427,98 @@ input:focus {
   gap: 6px;
 }
 
+.chat-fold {
+  padding: 0 8px;
+  line-height: 1.2;
+  border-radius: 6px;
+}
+
+.chat-tab {
+  position: relative;
+  align-self: flex-start;
+  padding: 6px 10px;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0.6;
+}
+
+.chat-tab:hover {
+  opacity: 1;
+}
+
+.chat-tab .count {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+}
+
 .quick {
   padding: 6px 8px;
+}
+
+/* The dance bar: one button a dance, wrapping onto a second row when there are many. The one on is lit. */
+.dance-bar {
+  padding: 4px 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.dance-bar button {
+  flex: 0 0 auto;
+  min-width: 30px;
+  padding: 2px 4px;
+  border: none;
+  background: none;
+  font-size: 18px;
+  line-height: 1.2;
+  border-radius: 6px;
+}
+
+.dance-bar button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.dance-bar button.aura {
+  box-shadow: inset 0 -2px 0 var(--aura);
+}
+
+.dance-bar button[aria-pressed="true"] {
+  background: rgba(255, 255, 255, 0.22);
+  box-shadow: 0 0 0 2px var(--aura, #ffd75e);
+  animation: dance-beat 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes dance-beat {
+  to {
+    transform: translateY(-2px) rotate(-6deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dance-bar button[aria-pressed="true"] {
+    animation: none;
+  }
+}
+
+.dance-bar .dance-more {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0.75;
+}
+
+/* At rest the chat is a faint overlay, so it doesn't hide the room: it comes up on hover, focus or a new line. */
+.chat-dock .chat,
+.chat-dock .quick,
+.chat-dock .dance-bar {
+  transition: opacity 0.2s;
+}
+
+.chat-dock:not(:hover):not(:focus-within):not(.fresh) .chat,
+.chat-dock:not(:hover):not(:focus-within):not(.fresh) .quick,
+.chat-dock:not(:hover):not(:focus-within):not(.fresh) .dance-bar:not(:has([aria-pressed="true"])) {
+  opacity: 0.4;
 }
 
 /* One line, however wide the platform draws its emoji (WebKit's are wider): the buttons share the row. */
@@ -482,10 +731,21 @@ input:focus {
   width: min(640px, calc(100vw - 24px));
 }
 
+.modal.xl {
+  width: min(980px, calc(100vw - 24px));
+}
+
+/* Stays at the top while a tall panel scrolls under it. */
 .modal-head {
+  position: sticky;
+  top: -14px;
+  z-index: 2;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin: -14px -16px 0;
+  padding: 14px 16px 6px;
+  background: var(--panel-solid);
 }
 
 .modal h2 {
@@ -555,6 +815,33 @@ input:focus {
   font-weight: 700;
 }
 
+.modal h2 .status {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.xp {
+  display: flex;
+  height: 6px;
+  margin: 4px 0;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.xp-done {
+  background: #2d5bd1;
+}
+
+.xp-gain {
+  background: #4ade80;
+}
+
+.xp-today {
+  color: #4ade80;
+  white-space: nowrap;
+}
+
 .chart {
   margin: 0;
 }
@@ -574,6 +861,7 @@ input:focus {
 .members li {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   padding: 3px 0;
 }
 
@@ -614,19 +902,6 @@ input:focus {
 .inline-form input,
 .field input {
   color: var(--text);
-}
-
-.look {
-  display: flex;
-  gap: 16px;
-  align-items: center;
-}
-
-.look-options {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
 }
 
 .cycle {
@@ -704,8 +979,32 @@ input:focus {
   width: 100%;
 }
 
+/* The rooms list: a room's name is the button that takes you there. */
+.rooms-box .who {
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  font-size: 12px;
+}
+
+.rooms-box .who:disabled {
+  cursor: default;
+  opacity: 0.6;
+  text-decoration: none;
+}
+
+.rooms-box .here:disabled {
+  opacity: 1;
+}
+
+.rooms-box .here {
+  color: var(--accent);
+}
+
 .miniboard-title {
   width: 100%;
+  margin: 0;
   text-align: left;
   border: none;
   background: none;
@@ -763,7 +1062,20 @@ input:focus {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 6px;
   font-size: 12px;
+}
+
+/* A long room name (a company's common room) gives way to the buttons instead of widening the map. */
+.minimap {
+  width: min-content;
+}
+
+.minimap header > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .minimap .zoom {
@@ -834,7 +1146,6 @@ input:focus {
 
 .mention-toast {
   max-width: min(520px, calc(100vw - 40px));
-  top: 110px;
   text-align: left;
   border: 1px solid var(--accent);
 }
@@ -893,8 +1204,318 @@ input:focus {
   border-color: var(--accent);
 }
 
+/* Buy / wear buttons sit at the card's bottom so prices line up across a row. */
+.shop li > button:last-child {
+  margin-top: auto;
+}
+
 .shop .avatar {
   align-self: center;
+}
+
+/* A two-line name, so cards in a row keep their prices level. */
+.shop .shop-item-name {
+  min-height: 2.8em;
+  display: grid;
+  place-items: center;
+  line-height: 1.4;
+}
+
+.shop li > button {
+  width: 100%;
+}
+
+.shop li:has(> button.primary:not(:disabled)):hover {
+  border-color: var(--accent);
+}
+
+.shop li:has(> button.primary:disabled) .avatar {
+  opacity: 0.55;
+}
+
+/* The Shop page's top: the keeper's line, the wallets, the tabs. */
+.shop-top {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shop-hello {
+  position: relative;
+  align-self: flex-start;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  font-style: italic;
+  color: var(--muted);
+}
+
+.shop-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.coin-chip {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--muted);
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.coin-chip strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.coin-chip.on {
+  opacity: 1;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.coin-chip.on strong {
+  color: var(--accent);
+}
+
+.shop-leave {
+  margin-left: auto;
+}
+
+.shop-top .pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-self: stretch;
+}
+
+.h3-note {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+
+.merch-pics {
+  display: flex;
+  justify-content: center;
+  align-items: end;
+  gap: 4px;
+}
+
+.merch-editor {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.merch-grid {
+  display: grid;
+  gap: 1px;
+  padding: 4px;
+  border: 1px solid var(--border, #444);
+  border-radius: 6px;
+}
+
+.merch-grid button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 0;
+}
+
+.company-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* The bag and wardrobe: you and your pet on the left, the tabs beside; changes wait in a save bar. */
+.wardrobe {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.wardrobe-preview {
+  position: sticky;
+  top: 0;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  padding: 12px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.wardrobe-preview .pet {
+  margin-top: -18px;
+  justify-self: end;
+}
+
+/* The live 3D stage: a soft spotlight on the floor behind you, and the hand that turns you. */
+.wardrobe-preview.stage {
+  gap: 4px;
+  padding: 8px;
+  background: radial-gradient(ellipse at 50% 70%, rgba(255, 211, 92, 0.16), rgba(255, 255, 255, 0.04) 70%);
+}
+
+.turntable {
+  cursor: grab;
+  touch-action: none;
+}
+
+.turntable:active {
+  cursor: grabbing;
+}
+
+.wardrobe-side {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.wardrobe-cycles {
+  display: grid;
+  gap: 6px;
+}
+
+.wardrobe-row {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+/* Level with the first row of squares, however many rows they wrap to. */
+.wardrobe-label {
+  padding-top: 26px;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.wardrobe-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.wardrobe-choices .cell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 68px;
+  height: 68px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.16); /* light enough for a dark hoodie */
+}
+
+.wardrobe-choices .cell.wearing {
+  border-color: var(--accent);
+  background: rgba(255, 211, 92, 0.2);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.wardrobe-choices .none {
+  font-size: 20px;
+  opacity: 0.6;
+}
+
+.wardrobe-save {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.wardrobe-save .muted {
+  margin-right: auto;
+}
+
+@media (max-width: 640px) {
+  .wardrobe {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .wardrobe-preview {
+    position: static;
+  }
+}
+
+/* Everything held: a square per kind; the picked one's name and buttons in a strip above. */
+.bag-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+}
+
+.bag-pick strong {
+  flex: 1;
+}
+
+.bag {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 76px);
+  gap: 6px;
+}
+
+.bag li {
+  position: relative;
+}
+
+.bag .cell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  padding: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.16); /* light enough for a dark hoodie */
+}
+
+.bag .cell[aria-pressed="true"] {
+  background: rgba(255, 211, 92, 0.2);
+}
+
+.bag .cell.wearing {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.bag .medal,
+.bag .n {
+  position: absolute;
+  font-size: 11px;
+}
+
+.bag .medal {
+  top: 2px;
+  left: 4px;
+}
+
+.bag .n {
+  right: 5px;
+  bottom: 2px;
 }
 
 .minimap .zoom button {
@@ -929,6 +1550,17 @@ input:focus {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* A trade: what you give beside what you get. */
+.trade-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.trade-sides .pills {
+  flex-wrap: wrap;
 }
 
 .listings li {
@@ -1224,4 +1856,2389 @@ button.lb-item:hover {
   font-size: 12px;
   white-space: nowrap;
   user-select: all;
+}
+
+/* The outage picnic: a gingham-edged banner at the top while an AI API is down. */
+.picnic-banner {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 16px 7px;
+  background: var(--panel);
+  border-radius: 10px;
+  border-top: 5px solid transparent;
+  border-image: repeating-linear-gradient(90deg, #d9574a 0 6px, #fbf7ef 6px 12px) 5 0 0 0;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.picnic-banner strong {
+  font-size: 15px;
+  color: var(--accent);
+}
+
+/*
+ * A green hour: a green-edged banner while the grid runs clean. Up a third of the day, so under the top bar
+ * rather than over it like the picnic's and the keynote's, and under theirs when they're up.
+ */
+.green-banner {
+  position: absolute;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 7px 14px 6px;
+  background: var(--panel);
+  border-radius: 10px;
+  border-top: 4px solid #3f9b5a;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.picnic-banner ~ .green-banner,
+.keynote-banner ~ .green-banner {
+  top: 80px;
+}
+
+.keynote-banner.below ~ .green-banner {
+  top: 142px;
+}
+
+.green-banner strong {
+  font-size: 14px;
+  color: #3f9b5a;
+}
+
+/* The 429 Cop's tickets on a player card: a badge that opens into the slips themselves. */
+.tickets summary {
+  display: inline-block;
+  margin: 2px 0 4px;
+  font-size: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.tickets summary::-webkit-details-marker {
+  display: none;
+}
+.tickets ol {
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.ticket {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border-left: 4px solid #4a6fd6;
+  border-radius: 3px;
+  background: #fbf7ef;
+  color: #2b2433;
+  font-size: 12px;
+}
+.ticket-head {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #c23a3a;
+}
+.ticket-sign {
+  align-self: flex-end;
+  font-style: italic;
+  color: #24336b;
+}
+
+/* The trophy shelf's list (E at the shelf in an office): two columns of sprite + name, how, and when. */
+.trophies {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 6px 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trophies li {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.trophies li > span {
+  display: flex;
+  flex-direction: column;
+}
+
+.trophies canvas {
+  flex: none;
+  image-rendering: pixelated;
+}
+
+.trophies .unearned strong {
+  color: var(--muted);
+}
+
+.trophies .earned {
+  color: var(--accent);
+}
+/* The traveling merchant's cart (Merchant.tsx): a card per edition, its stock as a bar. */
+.merchant-hello {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.merchant-hello p {
+  margin: 0;
+  font-style: italic;
+}
+
+.merchant-got {
+  margin: 8px 0 0;
+  color: var(--accent);
+}
+
+.shop.merchant li {
+  position: relative;
+  overflow: hidden;
+}
+
+.shop.merchant .stock {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.shop.merchant .stock span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.shop.merchant .mine {
+  color: var(--good);
+}
+
+.shop.merchant li.sold-out > :not(.stamp) {
+  opacity: 0.45;
+}
+
+.shop.merchant .stamp {
+  padding: 4px 0;
+  border: 2px solid var(--bad);
+  border-radius: 4px;
+  color: var(--bad);
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  transform: rotate(-8deg);
+}
+
+.bag-pick .edition {
+  color: var(--accent);
+  font-weight: 400;
+}
+
+/* Every item but furniture: its rarity, in its colour (`RARITY_COLOR`), and a line of flavour under the name. */
+.item-tag {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+.item-tag .rarity {
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+/* Milestones: every tenth level's title on the player card, and its gold level-up toast. */
+.milestone-title {
+  display: inline-block;
+  margin: 0 0 4px;
+  padding: 1px 8px;
+  border: 1px solid rgba(255, 211, 92, 0.5);
+  border-radius: 999px;
+  background: rgba(255, 211, 92, 0.12);
+  color: var(--accent);
+  font-weight: bold;
+}
+
+.milestone-title.legendary {
+  background: linear-gradient(90deg, #b8860b, #ffe066 50%, #b8860b);
+  color: var(--ink);
+  border-color: #fff1a8;
+}
+
+.milestone-toast {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  max-width: min(560px, calc(100vw - 40px));
+  text-align: left;
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 18px rgba(255, 211, 92, 0.35);
+}
+
+.milestone-toast.legendary {
+  background: linear-gradient(135deg, rgba(60, 44, 12, 0.95), rgba(27, 31, 42, 0.95) 60%);
+  animation: milestone-glow 1.6s ease-in-out infinite alternate;
+}
+
+@keyframes milestone-glow {
+  to {
+    box-shadow: 0 0 30px rgba(255, 224, 102, 0.7);
+  }
+}
+
+.milestone-art {
+  display: flex;
+  gap: 4px;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+.milestone-name {
+  color: var(--accent);
+  font-weight: bold;
+}
+
+.avatar.legendary {
+  filter: drop-shadow(0 0 6px rgba(255, 214, 74, 0.75));
+}
+
+/* The raid: the boss's HP in the corner box and the panel. */
+.raid-box {
+  padding: 6px 8px;
+}
+
+.raid-line {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 0 4px 4px;
+  font-size: 12px;
+}
+
+.raid-line .who {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hp {
+  height: 8px;
+  margin: 0 4px 2px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #5b1f1a;
+  overflow: hidden;
+}
+
+.hp span {
+  display: block;
+  height: 100%;
+  transition: width 0.6s ease-out;
+}
+
+.hp .ok {
+  background: #72bf52;
+}
+
+.hp .low {
+  background: #e9b73d;
+}
+
+.hp .dire {
+  background: #e06c5f;
+}
+
+.raid .hp {
+  height: 14px;
+  margin: 0 0 10px;
+}
+
+.raid .miniboard {
+  padding: 0;
+}
+
+.raid h3 {
+  margin: 12px 0 4px;
+  font-size: 13px;
+}
+
+.raid-status,
+.raid-me {
+  margin: 4px 0 8px;
+}
+
+.raid-rules {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+
+.raid-go {
+  width: 100%;
+  margin: 0 0 10px;
+}
+
+.raid-ladder {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.raid-ladder li {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.raid-ladder .rung {
+  font-weight: 700;
+  text-align: center;
+}
+
+.raid-ladder .fell {
+  background: rgba(233, 183, 61, 0.14);
+}
+
+.raid-ladder .now {
+  background: rgba(224, 108, 95, 0.16);
+  border: 1px solid rgba(224, 108, 95, 0.5);
+}
+
+.raid-ladder .ahead {
+  opacity: 0.45;
+}
+
+/* Before the first raid: the teaser. */
+.raid-clock {
+  padding: 0 4px 2px;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  font-variant-numeric: tabular-nums;
+  color: #f5d14a;
+}
+
+.raid-teaser-box .miniboard-title {
+  color: #f5d14a;
+}
+
+.raid-teaser {
+  text-align: center;
+}
+
+.raid-teaser .raid-rules {
+  text-align: left;
+}
+
+.raid-shadow {
+  position: relative;
+  width: 132px;
+  height: 132px;
+  margin: 4px auto 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(143, 95, 224, 0.45), rgba(143, 95, 224, 0) 70%);
+}
+
+.raid-silhouette {
+  image-rendering: pixelated;
+  animation: raid-lurk 2.4s ease-in-out infinite;
+}
+
+.raid-qqq {
+  position: absolute;
+  right: -8px;
+  top: 2px;
+  font-weight: 800;
+  font-size: 22px;
+  color: #c9a2ff;
+}
+
+.raid-hint {
+  margin: 2px 0 0;
+  font-style: italic;
+}
+
+.raid-countdown {
+  margin: 6px 0 4px;
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  font-variant-numeric: tabular-nums;
+  color: #f5d14a;
+}
+
+@keyframes raid-lurk {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-3px) scale(1.02);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .raid-silhouette {
+    animation: none;
+  }
+}
+
+/* In the dungeon the boss's name and HP are at the top: toasts go to the bottom instead. */
+#hud > .toasts.low {
+  top: auto;
+  bottom: 96px;
+}
+
+/* Raid loot (core/src/loot.ts): a frame in its rarity's colour, in the bag, the shop and the raid panel. */
+.rarity-common {
+  --rarity: #7fcf6a;
+}
+.rarity-rare {
+  --rarity: #5aa8ff;
+}
+.rarity-epic {
+  --rarity: #b57cff;
+}
+.rarity-legendary {
+  --rarity: #ffc93c;
+}
+
+.bag .cell.rarity,
+.shop li.rarity,
+.loot-table li.rarity {
+  border: 2px solid var(--rarity);
+  box-shadow:
+    0 0 6px color-mix(in srgb, var(--rarity) 55%, transparent),
+    inset 0 0 10px color-mix(in srgb, var(--rarity) 25%, transparent);
+}
+
+.bag .cell.rarity-legendary,
+.shop li.rarity-legendary,
+.loot-table li.rarity-legendary {
+  animation: legendary-glow 1.6s ease-in-out infinite;
+}
+
+@keyframes legendary-glow {
+  50% {
+    box-shadow:
+      0 0 14px var(--rarity),
+      inset 0 0 14px color-mix(in srgb, var(--rarity) 45%, transparent);
+  }
+}
+
+.rarity-text-common {
+  color: #7fcf6a;
+}
+.rarity-text-rare {
+  color: #5aa8ff;
+}
+.rarity-text-epic {
+  color: #c79bff;
+}
+.rarity-text-legendary {
+  color: #ffc93c;
+  font-weight: 700;
+}
+
+.loot-table {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.loot-table li {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  grid-template-rows: auto auto auto;
+  column-gap: 8px;
+  align-items: center;
+  padding: 4px 8px 4px 4px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.loot-table li .avatar {
+  grid-row: 1 / 4;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+}
+
+.loot-table .tier {
+  color: var(--rarity);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.loot-table .odds {
+  font-weight: 700;
+}
+
+.loot-table .owned {
+  color: var(--accent);
+}
+
+.loot-drops {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.loot-drops > li {
+  border-radius: 4px;
+}
+
+.loot-drops > li.open {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.loot-drops .head {
+  all: unset;
+  box-sizing: border-box;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 14px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+.loot-drops .head:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.loot-drops .head:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+.loot-drops .count {
+  font-weight: 700;
+  min-width: 18px;
+  text-align: right;
+}
+
+.loot-drops .pips {
+  display: flex;
+  gap: 3px;
+}
+
+.loot-drops .pip {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.rarity-pip-common {
+  background: #7fcf6a;
+}
+.rarity-pip-rare {
+  background: #5aa8ff;
+}
+.rarity-pip-epic {
+  background: #b57cff;
+}
+.rarity-pip-legendary {
+  background: #ffc93c;
+}
+
+.loot-drop-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 6px 4px 28px;
+}
+
+.loot-drop-list li {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 1px 0;
+}
+
+.loot-drop-list li:last-child {
+  display: block;
+  white-space: nowrap;
+}
+
+.loot-drops .rung {
+  font-weight: 700;
+  text-align: center;
+}
+
+.loot-toast {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/*
+ * Badge tiers (PlayerCard, Collection): each frame differs in shape as well as colour. Bronze is a plain
+ * border, silver a double one, gold adds a gem on top, diamond a dashed, glowing edge.
+ */
+.badge[class*="badge--"] {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 1px 6px 2px;
+  border: 1px solid var(--tier);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+}
+.badge--bronze {
+  --tier: #c98a4b;
+}
+.badge--silver {
+  --tier: #d5dbe4;
+  box-shadow:
+    0 0 0 2px rgba(27, 31, 42, 0.9),
+    0 0 0 3px var(--tier);
+  margin-right: 3px;
+}
+.badge--gold {
+  --tier: #ffd75e;
+  box-shadow: 0 0 6px rgba(255, 215, 94, 0.35);
+}
+.badge--gold::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: calc(50% - 3px);
+  width: 6px;
+  height: 6px;
+  background: var(--tier);
+  transform: rotate(45deg);
+}
+.badge--diamond {
+  --tier: #7fe8ff;
+  border-style: dashed;
+  box-shadow: 0 0 8px rgba(127, 232, 255, 0.5);
+}
+/* Past diamond: mythic has two gems on top, cosmic adds a double ring and a glow that shimmers. */
+.badge.badge--mythic {
+  --tier: #ff62c4;
+  border-width: 2px;
+  box-shadow: 0 0 10px rgba(255, 98, 196, 0.6);
+}
+.badge.badge--cosmic {
+  --tier: #a98bff;
+  border-width: 2px;
+  margin-right: 3px;
+  background: linear-gradient(
+    135deg,
+    rgba(169, 139, 255, 0.28),
+    rgba(255, 98, 196, 0.22),
+    rgba(127, 232, 255, 0.28)
+  );
+  box-shadow:
+    0 0 0 2px rgba(27, 31, 42, 0.9),
+    0 0 0 3px var(--tier),
+    0 0 12px rgba(169, 139, 255, 0.7);
+}
+.badge--mythic::before,
+.badge--mythic::after,
+.badge--cosmic::before,
+.badge--cosmic::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  width: 6px;
+  height: 6px;
+  background: var(--tier);
+  transform: rotate(45deg);
+}
+.badge--mythic::before,
+.badge--cosmic::before {
+  left: 8px;
+}
+.badge--mythic::after,
+.badge--cosmic::after {
+  right: 8px;
+}
+.badge-bar {
+  display: block;
+  height: 3px;
+  min-width: 48px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.badge-bar i {
+  display: block;
+  height: 100%;
+  background: var(--tier, var(--accent));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .badge--diamond {
+    animation: diamond-glint 2.4s ease-in-out infinite;
+  }
+  .badge--cosmic {
+    animation: cosmic-shimmer 2.8s ease-in-out infinite;
+  }
+}
+@keyframes cosmic-shimmer {
+  50% {
+    box-shadow:
+      0 0 0 2px rgba(27, 31, 42, 0.9),
+      0 0 0 3px #7fe8ff,
+      0 0 14px rgba(127, 232, 255, 0.85);
+  }
+}
+@keyframes diamond-glint {
+  50% {
+    box-shadow: 0 0 12px rgba(127, 232, 255, 0.85);
+  }
+}
+
+/* The collection log and the Hall of Fame: a grid of icon + words, unearned ones greyed. */
+.collection,
+.hall {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 6px 12px;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+.collection li,
+.hall li {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+}
+.collection li > span:last-child,
+.hall li > span:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.collection canvas,
+.hall canvas {
+  flex: none;
+  image-rendering: pixelated;
+}
+.collection .unearned > :first-child {
+  filter: grayscale(1);
+  opacity: 0.4;
+}
+.collection .unearned strong {
+  color: var(--muted);
+}
+.entry-icon {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 36px;
+}
+.entry-icon .entry-emoji {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+}
+.entry-emoji {
+  font-size: 22px;
+}
+.hall-lines {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+.hall-lines li {
+  margin: 2px 0;
+}
+.tourney-champ {
+  margin: 4px 0 8px;
+}
+.tourney-players {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.tourney-bracket {
+  display: flex;
+  gap: 16px;
+  margin: 8px 0;
+  overflow-x: auto;
+}
+.tourney-round {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  gap: 8px;
+  min-width: 110px;
+}
+.tourney-match {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+.tourney-match span {
+  padding: 2px 6px;
+  min-height: 1.4em;
+}
+.tourney-match span + span {
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.tourney-match .won {
+  font-weight: 700;
+  color: #ffd75a;
+}
+.tourney-match .empty {
+  opacity: 0.45;
+}
+.quests {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.quests li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+}
+.quests li.done > span:first-child {
+  color: var(--good);
+}
+.quests .coins {
+  text-align: right;
+}
+.quest-bar {
+  grid-column: 1;
+  align-self: center;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+.quest-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.quest-bar.done > span {
+  background: var(--good);
+}
+.quests li > .small {
+  text-align: right;
+}
+
+.quest-pips {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.quest-pip {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--muted);
+  background: linear-gradient(to top, var(--accent) var(--fill, 0%), transparent var(--fill, 0%));
+}
+.quest-pip.done {
+  background: var(--good);
+  border-color: var(--good);
+}
+
+/* Player card v2: bio, showcase shelf and "how they work". */
+.bio {
+  margin: 2px 0;
+}
+.bio-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 4px 0;
+}
+/* The text takes the whole row; the count and the buttons share the one below. */
+.bio-edit textarea {
+  flex: 1 0 100%;
+  resize: none;
+  font: inherit;
+}
+.bio-edit .count {
+  margin-right: auto;
+}
+.shelf ul,
+.shelf-picker .bag {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 2px;
+  padding: 0;
+  list-style: none;
+}
+.shelf li {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 74px;
+  padding: 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  text-align: center;
+}
+.shelf li.empty {
+  background: none;
+  border: 1px dashed var(--line);
+}
+.shelf canvas {
+  image-rendering: pixelated;
+}
+.shelf-picker .bag {
+  flex-wrap: wrap;
+  gap: 8px 6px;
+}
+.shelf-picker .bag li {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 92px;
+}
+.shelf-picker .cell {
+  width: 100%;
+}
+.pick-name {
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.pick-name span {
+  font-size: 10px;
+  text-transform: capitalize;
+}
+.shelf-picker .cell .n {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.how h3 {
+  margin: 10px 0 4px;
+  font-size: 13px;
+}
+.how p {
+  margin: 4px 0;
+}
+.how .chip {
+  display: inline-block;
+  margin: 0 4px 2px 0;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+}
+.how .hours {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.how .hours svg {
+  width: 144px;
+  height: 36px;
+  fill: var(--accent);
+}
+.stats .muted-stat dd {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+/* The regulars' list sits in the modal, not a corner card: roomier rows. */
+.regulars li button {
+  font-size: 14px;
+  padding: 4px 6px;
+}
+.regulars .rank {
+  width: 22px;
+  flex: none;
+}
+
+/* Graphics: the tier list, its advanced fold, and the FPS meter. */
+.graphics-tiers > button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.graphics-tiers .small {
+  display: block;
+}
+
+.graphics-adv {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.graphics-adv label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fps-meter {
+  position: absolute;
+  left: 52px;
+  top: 14px;
+  padding: 2px 8px;
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.fps-meter {
+  white-space: nowrap;
+}
+
+.tray {
+  display: none;
+}
+
+/* A phone, or a short landscape screen: the side panels fold into the tray's icons, one open at a time. */
+@media (max-width: 700px), (max-height: 500px) {
+  .tray {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+    display: flex;
+    gap: 6px;
+  }
+
+  .tray .icon {
+    width: 44px;
+    height: 44px;
+    font-size: 20px;
+    background: var(--panel);
+    border-radius: 10px;
+  }
+
+  .tray .icon.on {
+    outline: 2px solid var(--accent);
+  }
+
+  .hints {
+    top: 8px;
+    left: 8px;
+  }
+
+  .hints dl {
+    display: none;
+  }
+
+  .stats-chip {
+    top: 8px;
+    right: 8px;
+    left: 52px;
+    justify-content: flex-end;
+    overflow-x: auto;
+    padding: 4px;
+    gap: 4px;
+    font-size: 12px;
+  }
+
+  .fps-meter {
+    top: 54px;
+    left: 8px;
+    font-size: 10px;
+  }
+
+  .corner,
+  .minimap,
+  .chat-dock {
+    top: auto;
+    right: auto;
+    left: 8px;
+    bottom: 60px;
+  }
+
+  .corner {
+    width: min(260px, calc(100vw - 16px));
+    max-height: calc(100vh - 130px);
+    overflow-y: auto;
+  }
+
+  .chat-dock {
+    width: calc(100vw - 16px);
+  }
+
+  .chat-dock .chat {
+    max-height: 38vh;
+  }
+
+  .dialog {
+    width: calc(100vw - 16px);
+    min-width: 0;
+    bottom: 60px;
+  }
+
+  .banner,
+  .toast,
+  #hud > .toasts {
+    top: 54px;
+    max-width: calc(100vw - 16px);
+  }
+
+  #hud > .toasts {
+    top: 90px;
+  }
+}
+
+/*
+ * MARK: Block Hood skin. On the 3D tiers (`stage.ts` sets `data-tier` on <html>) the panels read like the voxel
+ * world's labels: cream on ink, gold accents, chunky bevelled borders and flat blocky shadows. Low keeps the
+ * classic look above untouched.
+ */
+html[data-tier]:not([data-tier="low"]) {
+  --ink: #2b2433;
+  --panel: rgba(43, 36, 51, 0.94);
+  --panel-solid: #2b2433;
+  --line: rgba(251, 247, 239, 0.16);
+  --text: #fbf7ef;
+  --muted: #c4b9cf;
+  --accent: #e9b73d;
+  --edge: #16121f;
+  --bevel-light: rgba(251, 247, 239, 0.18);
+  --bevel-dark: rgba(0, 0, 0, 0.45);
+  --block: 0 0 0 2px var(--edge);
+}
+
+html[data-tier]:not([data-tier="low"]) .panel {
+  border: 2px solid var(--edge);
+  border-radius: 4px;
+  backdrop-filter: none;
+  box-shadow:
+    inset 2px 2px 0 var(--bevel-light),
+    inset -2px -2px 0 var(--bevel-dark);
+}
+
+html[data-tier]:not([data-tier="low"]) .modal-head {
+  box-shadow: 0 2px 0 var(--edge);
+}
+
+html[data-tier]:not([data-tier="low"]) button {
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  background: #3b3249;
+  box-shadow:
+    inset 1px 1px 0 var(--bevel-light),
+    inset -1px -1px 0 var(--bevel-dark),
+    2px 2px 0 rgba(0, 0, 0, 0.35);
+}
+
+html[data-tier]:not([data-tier="low"]) button:hover {
+  background: #4a405c;
+}
+
+html[data-tier]:not([data-tier="low"]) button:active:not(:disabled) {
+  transform: translate(1px, 1px);
+  box-shadow:
+    inset 1px 1px 0 var(--bevel-dark),
+    1px 1px 0 rgba(0, 0, 0, 0.35);
+}
+
+html[data-tier]:not([data-tier="low"]) button.primary {
+  background: var(--accent);
+  color: var(--ink);
+  border-color: #6b4f0e;
+}
+
+html[data-tier]:not([data-tier="low"]) button.primary:hover {
+  background: #f2c653;
+}
+
+html[data-tier]:not([data-tier="low"]) button.link,
+html[data-tier]:not([data-tier="low"]) button.backdrop,
+html[data-tier]:not([data-tier="low"]) .pills button,
+html[data-tier]:not([data-tier="low"]) .merch-grid button {
+  border: none;
+  box-shadow: none;
+  transform: none;
+}
+
+/* The modal backdrop is a full-screen button: the world shows through it, not a button's fill. */
+html[data-tier]:not([data-tier="low"]) button.backdrop,
+html[data-tier]:not([data-tier="low"]) button.backdrop:hover {
+  background: none;
+}
+
+html[data-tier]:not([data-tier="low"]) .pills {
+  border-radius: 3px;
+  box-shadow: var(--block);
+  background: rgba(0, 0, 0, 0.35);
+}
+
+html[data-tier]:not([data-tier="low"]) .pills button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--ink);
+  border-radius: 2px;
+}
+
+/* Buttons that read as text or a list row (a chat author, a quick emoji, a name to pick) stay flat. */
+html[data-tier]:not([data-tier="low"])
+  :is(.chat .author, .quick-emojis button, .whos-here-list button, .suggestions li button) {
+  border: none;
+  background: none;
+  box-shadow: none;
+  transform: none;
+}
+
+html[data-tier]:not([data-tier="low"])
+  :is(.quick-emojis button, .whos-here-list button, .suggestions li button):hover,
+html[data-tier]:not([data-tier="low"]) .quick-emojis .quick-toggle[aria-expanded="true"] {
+  background: rgba(251, 247, 239, 0.12);
+}
+
+html[data-tier]:not([data-tier="low"]) .suggestions li button[aria-pressed="true"] {
+  background: rgba(233, 183, 61, 0.2);
+}
+
+html[data-tier]:not([data-tier="low"]) input,
+html[data-tier]:not([data-tier="low"]) textarea {
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.35);
+}
+
+/* Item tiles: a little larger, bevelled, each icon standing on an isometric floor tile. */
+html[data-tier]:not([data-tier="low"]) .shop {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+}
+
+html[data-tier]:not([data-tier="low"]) .shop-hello,
+html[data-tier]:not([data-tier="low"]) .coin-chip {
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  background: #352c41;
+}
+
+html[data-tier]:not([data-tier="low"]) .coin-chip.on {
+  border-color: var(--accent);
+  box-shadow: none;
+}
+
+html[data-tier]:not([data-tier="low"]) .bag {
+  grid-template-columns: repeat(auto-fill, 84px);
+}
+
+html[data-tier]:not([data-tier="low"]) .bag .cell {
+  width: 84px;
+  height: 84px;
+}
+
+html[data-tier]:not([data-tier="low"]) .shop li,
+html[data-tier]:not([data-tier="low"]) .bag .cell,
+html[data-tier]:not([data-tier="low"]) .loot-table li,
+html[data-tier]:not([data-tier="low"]) .wardrobe-choices .cell,
+html[data-tier]:not([data-tier="low"]) .trophies li,
+html[data-tier]:not([data-tier="low"]) .collection li,
+html[data-tier]:not([data-tier="low"]) .hall li {
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  background: #352c41;
+  box-shadow: inset 1px 1px 0 var(--bevel-light);
+}
+
+html[data-tier]:not([data-tier="low"]) .shop li.wearing,
+html[data-tier]:not([data-tier="low"]) .bag .cell.wearing,
+html[data-tier]:not([data-tier="low"]) .wardrobe-choices .cell.wearing {
+  border-color: var(--accent);
+  box-shadow: inset 1px 1px 0 var(--bevel-light);
+}
+
+html[data-tier]:not([data-tier="low"]) .bag .cell[aria-pressed="true"] {
+  background: #4a3d2a;
+}
+
+html[data-tier]:not([data-tier="low"]) .loot-table li .avatar {
+  background: none;
+}
+
+.icon3d {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  vertical-align: bottom;
+}
+
+/* The floor tile under the icon. */
+.icon3d::before {
+  content: "";
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  bottom: 2%;
+  height: 40%;
+  background: rgba(251, 247, 239, 0.1);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+
+.icon3d > canvas {
+  position: relative;
+  image-rendering: auto;
+  display: block;
+}
+
+.icon3d-wait {
+  position: relative;
+  display: grid;
+  place-items: center;
+  filter: blur(0.6px) saturate(0.6);
+  opacity: 0.5;
+}
+
+/* The poker table, docked while you sit at it: a felt with the board and the pot, six chairs round it, your hand, the moves. */
+.poker {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  /* Between the chat dock on the left and the minimap on the right. */
+  width: min(560px, calc(100vw - 880px));
+  min-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+@media (max-width: 1150px) {
+  .poker {
+    bottom: 230px;
+  }
+}
+
+.poker header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.poker header .title {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.pk-status {
+  flex: 1;
+  text-align: right;
+  color: var(--muted);
+}
+
+.pk-status.mine {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* The chairs sit on the rail, round an oval felt; seats are placed by `pk-at-N` (0 is you, at the bottom). */
+.pk-table {
+  position: relative;
+  height: 236px;
+}
+
+.pk-felt {
+  position: absolute;
+  inset: 20px 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  /* Room below the pot for your own bet. */
+  padding-bottom: 16px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, #2f7a4a 0%, #1f5a35 75%);
+  box-shadow:
+    0 0 0 6px #6b4a2b,
+    0 0 0 8px #3b2716,
+    inset 0 0 18px rgba(0, 0, 0, 0.5);
+}
+
+.pk-cards {
+  display: flex;
+  gap: 4px;
+}
+
+.pk-pot {
+  white-space: nowrap;
+  font-weight: 700;
+  color: #ffe9a8;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.pk-result {
+  margin: 0;
+  max-width: 70%;
+  text-align: center;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.pk-card {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 42px;
+  border-radius: 4px;
+  background: #fbf7ef;
+  color: #23202b;
+  border: 1px solid rgba(0, 0, 0, 0.55);
+  font-size: 13px;
+  line-height: 1.1;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.3);
+}
+
+.pk-card b {
+  font-size: 14px;
+}
+
+.pk-card.small {
+  width: 16px;
+  height: 22px;
+  border-radius: 2px;
+  font-size: 8px;
+  line-height: 1;
+}
+
+.pk-card.small b {
+  font-size: 9px;
+}
+
+.pk-card.red {
+  color: #c0392b;
+}
+
+.pk-card.back {
+  background: repeating-linear-gradient(45deg, #7a2a3a 0 4px, #5e1f2d 4px 8px);
+  border-color: #f1e6d2;
+}
+
+.pk-card.empty {
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px dashed rgba(255, 255, 255, 0.28);
+  box-shadow: none;
+}
+
+.pk-seat {
+  position: absolute;
+  width: 108px;
+}
+
+.pk-at-0 {
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+}
+
+.pk-at-1 {
+  left: 0;
+  top: 70%;
+  transform: translateY(-50%);
+}
+
+.pk-at-2 {
+  left: 0;
+  top: 26%;
+  transform: translateY(-50%);
+}
+
+.pk-at-3 {
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+}
+
+.pk-at-4 {
+  right: 0;
+  top: 26%;
+  transform: translateY(-50%);
+}
+
+.pk-at-5 {
+  right: 0;
+  top: 70%;
+  transform: translateY(-50%);
+}
+
+.pk-plate {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 7px 5px;
+  border-radius: 6px;
+  background: var(--panel-solid);
+  border: 2px solid var(--line);
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.pk-seat.empty .pk-plate {
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  background: rgba(0, 0, 0, 0.25);
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.pk-seat.mine .pk-plate {
+  border-color: var(--good);
+}
+
+.pk-seat.turn .pk-plate {
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(255, 211, 92, 0.45);
+}
+
+.pk-seat.won .pk-plate {
+  border-color: var(--accent);
+  background: #4a3b16;
+}
+
+.pk-seat.folded .pk-plate {
+  opacity: 0.5;
+}
+
+.pk-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.pk-stack {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.pk-minis {
+  display: flex;
+  gap: 2px;
+}
+
+.pk-last {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.pk-seat.won .pk-last {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* How long the player to act has left: a bar along the plate's foot that runs down. */
+.pk-clock {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--accent);
+  transition: width 250ms linear;
+}
+
+.pk-dealer {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 15px;
+  height: 15px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #fbf7ef;
+  color: #23202b;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+/* The chips in front of a seat: on the felt side of its plate. */
+.pk-bet {
+  position: absolute;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(10, 8, 28, 0.8);
+  color: #ffe9a8;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.pk-at-0 .pk-bet {
+  bottom: calc(100% + 5px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.pk-at-3 .pk-bet {
+  top: calc(100% + 5px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.pk-at-1 .pk-bet,
+.pk-at-2 .pk-bet {
+  left: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.pk-at-4 .pk-bet,
+.pk-at-5 .pk-bet {
+  right: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* Your two cards and what they make, then the moves: fold and call beside the cards, the raise on a line below. */
+.pk-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.pk-foot:empty {
+  display: none;
+}
+
+.pk-hand {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pk-hand .pk-card {
+  width: 38px;
+  height: 52px;
+  font-size: 16px;
+}
+
+.pk-hand .pk-card b {
+  font-size: 17px;
+}
+
+.pk-made {
+  margin-left: 6px;
+  font-weight: 700;
+  color: var(--good);
+}
+
+.pk-moves {
+  display: contents;
+}
+
+.pk-moves .go {
+  background: rgba(255, 211, 92, 0.2);
+  border-color: var(--accent);
+}
+
+.pk-moves .pk-fold {
+  color: var(--bad);
+}
+
+.pk-raise {
+  display: flex;
+  flex: 1 1 100%;
+  align-items: center;
+  gap: 4px;
+}
+
+.pk-raise input[type="range"] {
+  flex: 1;
+  min-width: 60px;
+  padding: 0;
+}
+
+/* The 3D shops' buy card (`render3d/shops/shopPanel.ts`): left of the corner panels and the minimap, not over them. */
+#shopcard {
+  right: 244px;
+}
+
+@media (max-width: 700px) {
+  #shopcard {
+    left: 12px;
+    right: 12px;
+    width: auto;
+  }
+}
+
+/* The company page's house: its tier, and how far to the next one. */
+.co-tier {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.co-tier strong {
+  font-size: 15px;
+}
+
+.co-progress {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.co-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.wallet-log .good {
+  color: var(--good);
+}
+
+/* The bag's way to the shops for what it holds none of: one row of small buttons. */
+.bag-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.bag-more button {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+/* The player card's head: who they are beside their picture. */
+.card-who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.phone-pairing {
+  margin-top: 20px;
+  border-top: 1px solid var(--line, #454b57);
+  padding-top: 12px;
+}
+.phone-pairing > img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  background: white;
+  image-rendering: pixelated;
+}
+.phone-pairing .command code {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.phone-signin,
+.phone-signin label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.phone-signin input {
+  width: 100%;
+  min-width: 0;
+}
+.phone-signin button {
+  align-self: flex-start;
+}
+
+/* The Tavern's request pile. */
+.request-new {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.request-new textarea {
+  flex: 1;
+  resize: none;
+  font: inherit;
+}
+.requests {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.request {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.request.done,
+.request.declined {
+  opacity: 0.6;
+}
+.request .vote {
+  min-width: 52px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.request .vote.on {
+  outline: 2px solid var(--accent);
+}
+.request-body {
+  flex: 1;
+  min-width: 0;
+}
+.request-body p {
+  margin: 0 0 2px;
+  overflow-wrap: anywhere;
+}
+.request .status.planned {
+  color: #ffd75a;
+  font-weight: 700;
+}
+.request .status.done {
+  color: #72bf52;
+  font-weight: 700;
+}
+
+/* What's new after an update: top left, under the controls ⓘ (which opens over it). */
+.hints:is(:hover, :focus-within) {
+  z-index: 1;
+}
+
+.whats-new {
+  position: absolute;
+  top: 54px;
+  left: 12px;
+  width: min(360px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  overflow: hidden;
+  animation: whats-new-in 0.2s ease-out;
+}
+
+.whats-new header {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.whats-new-head,
+.whats-new-head:hover {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+
+.whats-new-head strong {
+  color: var(--accent);
+}
+
+.whats-new-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: min(420px, calc(100vh - 140px));
+  overflow-y: auto;
+}
+
+.whats-new-body .link {
+  align-self: flex-start;
+  padding: 0;
+}
+
+/* Drains over the 10 s it stays; hovering holds it. */
+.whats-new-timer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--accent);
+  transform-origin: left;
+  animation: drain 10s linear forwards;
+}
+
+.whats-new:is(:hover, :focus-within) .whats-new-timer {
+  animation-play-state: paused;
+}
+
+@keyframes drain {
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes whats-new-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* The way to star the repo (Stars.tsx): in the menu, the changelog and the star counter's panel. */
+.star-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #6b4f0e;
+  background: var(--accent);
+  color: var(--ink);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.star-button:hover {
+  background: #f2c653;
+}
+
+.menu > a.star-button {
+  background: var(--accent);
+  color: var(--ink);
+  border-color: #6b4f0e;
+}
+
+.star-button-count {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(43, 36, 51, 0.18);
+  font-size: 12px;
+}
+
+.stars {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.stars p {
+  margin: 0;
+}
+
+.stars-count {
+  font-size: 40px;
+  font-weight: 900;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.stars-next {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-self: stretch;
+}
+
+.changelog-star {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
+.changelog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.release h3 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--accent);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.release h3 .muted {
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.release h4 {
+  margin: 8px 0 2px;
+  font-size: 12px;
+}
+
+.release ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.release li {
+  margin: 3px 0;
+}
+
+.release .scope {
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: rgba(143, 227, 255, 0.15);
+  color: var(--good);
+  font-size: 11px;
+}
+
+.release a {
+  color: inherit;
+}
+
+/* A dance in the shop: its emoji in the item's square. */
+.dance-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  font-size: 40px;
+}
+
+.julekalender {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.julekalender li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 64px;
+  padding: 6px 4px;
+  border: 2px solid #8c1d24;
+  border-radius: 6px;
+  background: #b3262e;
+  color: #fbf7ef;
+  text-align: center;
+}
+
+.julekalender .door-n {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.julekalender li.today {
+  border-color: #f5d14a;
+  box-shadow: 0 0 0 2px #f5d14a55;
+}
+
+.julekalender li.opened {
+  background: #2f6b3a;
+  border-color: #1f4d29;
+}
+
+.julekalender li.missed {
+  opacity: 0.45;
+}
+
+.julekalender .muted {
+  color: inherit;
+  opacity: 0.8;
+}
+
+/* Your pet: stroke, treat, trick. Over the world, above the hotbar's place, so the pet stays in sight. */
+.pet-menu {
+  position: absolute;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: stretch;
+}
+
+.pet-menu header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.pet-menu .close {
+  border: none;
+  background: none;
+  opacity: 0.7;
+}
+
+.pet-menu .acts {
+  display: flex;
+  gap: 4px;
+}
+
+.pet-menu p {
+  margin: 0;
+}
+
+@media (max-width: 1150px) {
+  .pet-menu {
+    bottom: 240px;
+  }
+}
+
+/* A borrowed rod and a small pond, usable by pointer, keyboard and touch. */
+.fishing-scene {
+  position: relative;
+  flex-shrink: 0;
+  height: 112px;
+  margin: 16px 0;
+  overflow: hidden;
+  border: 2px solid #4b6972;
+  background: repeating-linear-gradient(0deg, #467e91 0 12px, #508b9c 12px 14px);
+}
+.fishing-reeds {
+  position: absolute;
+  left: 14px;
+  bottom: 0;
+  font-size: 44px;
+}
+.fishing-bobber {
+  position: absolute;
+  left: 50%;
+  top: 45%;
+  width: 9px;
+  height: 15px;
+  background: linear-gradient(#db655f 45%, #fff0d1 45%);
+  border: 2px solid #2b3548;
+  opacity: 0;
+}
+.fishing-bobber.cast {
+  opacity: 1;
+  animation: fishing-bob 1.5s ease-in-out infinite;
+}
+.biting .fishing-bobber {
+  animation: fishing-bob 0.2s ease-in-out infinite;
+}
+.fishing-catch {
+  position: absolute;
+  right: 22px;
+  bottom: 10px;
+}
+.fishing-catch.leap {
+  animation: fishing-leap 0.7s cubic-bezier(0.2, 0.8, 0.3, 1.2) both;
+}
+.fish-pic {
+  display: block;
+  image-rendering: pixelated;
+}
+.fishing-status code {
+  font-size: 0.95em;
+}
+.fishing-record {
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  border: 2px solid #ffd75e;
+  background: rgba(255, 215, 94, 0.12);
+  font-weight: bold;
+}
+.fishing-treasure {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin: 0 0 12px;
+  padding: 10px;
+  border: 2px solid var(--r);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--r) 45%, transparent);
+  animation: fishing-shine 1.6s ease-in-out infinite alternate;
+}
+.fishing-treasure > span,
+.fishing-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.fishing-luck {
+  margin: 4px 0 10px;
+}
+.fishing-timer {
+  display: block;
+  width: 100%;
+  height: 14px;
+  margin-bottom: 12px;
+  accent-color: #8db56b;
+}
+.fishing-journal {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  column-gap: 20px;
+  list-style: none;
+  padding: 0;
+}
+.fishing-journal li {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border, #66566d);
+}
+.fishing-journal li .fishing-entry {
+  flex: 1;
+}
+.fishing-journal li.unseen strong {
+  opacity: 0.6;
+}
+.fishing-journal li.mine {
+  background: rgba(255, 215, 94, 0.08);
+}
+.fishing-blurb {
+  opacity: 0.8;
+  font-style: italic;
+}
+.fishing-medals {
+  display: flex;
+  gap: 4px;
+  font-size: 20px;
+  white-space: nowrap;
+}
+.fishing-treasures {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+  list-style: none;
+  padding: 0;
+}
+.fishing-treasures li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 6px;
+  text-align: center;
+  border: 2px solid var(--r);
+}
+.fishing-treasures li.unseen {
+  border-style: dashed;
+  opacity: 0.55;
+}
+.fishing-treasure-pic {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  font-size: 32px;
+}
+@keyframes fishing-leap {
+  0% {
+    transform: translate(-80px, 60px) rotate(-30deg);
+    opacity: 0;
+  }
+  60% {
+    transform: translate(-10px, -18px) rotate(10deg);
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+  }
+}
+@keyframes fishing-shine {
+  to {
+    box-shadow: 0 0 30px color-mix(in srgb, var(--r) 70%, transparent);
+  }
+}
+@keyframes fishing-bob {
+  50% {
+    transform: translateY(5px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fishing-bobber.cast,
+  .biting .fishing-bobber,
+  .fishing-catch.leap,
+  .fishing-treasure {
+    animation: none;
+  }
+  .biting .fishing-bobber {
+    outline: 3px solid #ffe9a8;
+  }
 }

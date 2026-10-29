@@ -1,8 +1,8 @@
 /**
  * One game being played. It runs the game's rules (core/src/games), keeps its
- * timers, sends each viewer their own view, and tells `arcade` how it ended.
+ * timers, sends each viewer their own view, and tells `arcade` it moved on and how it ended.
  */
-import { gameOf } from "@tokenmaxxing/core/games/index.ts";
+import { gameOf, publicStatus } from "@tokenmaxxing/core/games/index.ts";
 import type { Split } from "@tokenmaxxing/core/games/payouts.ts";
 import { type GameId, isRefused, type Options, type Outcome } from "@tokenmaxxing/core/games/types.ts";
 import type { Frame, MatchChatLine, MatchInfo, Seat } from "@tokenmaxxing/core/games/wire.ts";
@@ -21,7 +21,6 @@ import {
   main,
   requireInternal,
   requireUser,
-  type TokenCache,
   waitForTick,
 } from "./shared.ts";
 
@@ -83,9 +82,8 @@ export const match = actor({
       forfeited: [],
     };
   },
-  createVars: () => ({ tokens: new Map() as TokenCache, chat: new RateLimiter(CHAT_PER_MIN, 60_000) }),
-  createConnState: (c, params: ConnParams): Promise<Caller> =>
-    authenticate(params, c.client(), c.vars.tokens),
+  createVars: () => ({ chat: new RateLimiter(CHAT_PER_MIN, 60_000) }),
+  createConnState: (c, params: ConnParams): Promise<Caller> => authenticate(params, c.client()),
   // Only a person watching changes what the frames show (the watcher count). Other actors' calls,
   // like each app's battle poll, connect too.
   onConnect: (c, conn): void => {
@@ -100,7 +98,7 @@ export const match = actor({
     while (!signal.aborted && !c.state.reported) {
       // Look every turn, not only after a change: a restart between saving the final state and
       // finishing left a game over but never paid out, as nothing changed after it.
-      const ended = c.state.outcome ? null : def.outcome(plain(c.state).state);
+      const ended = c.state.outcome ? null : def.outcome(plainState(c.state));
       if (ended) {
         await c.keepAwake(finish(c, ended));
         continue;
@@ -134,7 +132,7 @@ export const match = actor({
           continue;
         }
       }
-      if (next !== current.state) await c.keepAwake(apply(c, next));
+      if (next !== current.state) await c.keepAwake(apply(c, next, current.state));
     }
   },
   actions: {
@@ -151,7 +149,7 @@ export const match = actor({
       if (s.outcome) throw new UserError("This game is over.", { code: "over" });
       const next = defOf(s).move(s.state, player, move, Date.now());
       if (isRefused(next)) throw new UserError(next.refused, { code: "refused" });
-      if (next !== s.state) await apply(c, next);
+      if (next !== s.state) await apply(c, next, s.state);
     },
 
     /** Give up: you're placed last, and your stake stays in the pot. */
@@ -161,7 +159,7 @@ export const match = actor({
       requirePlayer(s, userId);
       if (s.outcome || s.forfeited.includes(userId)) return;
       c.state.forfeited = [...s.forfeited, userId];
-      await apply(c, defOf(s).forfeit(s.state, userId, Date.now()));
+      await apply(c, defOf(s).forfeit(s.state, userId, Date.now()), s.state);
     },
 
     /** The match's chat so far, when opening the game. */
@@ -181,7 +179,8 @@ export const match = actor({
         c.state.players.find((p) => p.userId === userId)?.name ??
         (await main(c.client()).town.names([userId]))[userId] ??
         "?";
-      const chat = c.state.chat ?? [];
+      // From a plain copy: spreading the live array would wrap the old lines in one more proxy each time.
+      const chat: MatchChatLine[] = JSON.parse(JSON.stringify(c.state.chat ?? []));
       const line: MatchChatLine = { id: (chat.at(-1)?.id ?? 0) + 1, userId, name, text, at: Date.now() };
       c.state.chat = [...chat, line].slice(-CHAT_HISTORY);
       for (const conn of c.conns.values())
@@ -212,7 +211,7 @@ export const match = actor({
       const current = plain(c.state);
       if (!standing(current, userId)) return null;
       const next = def.usage(current.state, userId, used, Date.now());
-      if (next !== current.state) await apply(c, next);
+      if (next !== current.state) await apply(c, next, current.state);
       return standing(plain(c.state), userId);
     },
 
@@ -313,10 +312,10 @@ const frameFor = (s: MatchState, you: number | null, watchers: number): Frame =>
 });
 
 /** Everyone connected gets their own view: players see their secrets, watchers don't. */
-function pushFrames(c: MatchCtx): void {
+function pushFrames(c: MatchCtx, kept?: MatchState): void {
   const viewers = [...c.conns.values()].filter((conn) => (conn.state as Caller).kind === "user");
   if (!viewers.length) return;
-  const s = plain(c.state);
+  const s = kept ?? plain(c.state);
   const watchers = watchersOf(c, s);
   for (const conn of viewers) conn.send("frame", frameFor(s, viewerOf(s, conn.state), watchers));
 }
@@ -326,37 +325,44 @@ function pushFrames(c: MatchCtx): void {
  * ranking, mapping and spreading live state can retain proxies in new state and multiply the work
  * on later updates. Only writes go through the live state; a no-op compares against its own snapshot.
  */
-const plain = (s: MatchState): MatchState => JSON.parse(JSON.stringify(s));
+const plain = (s: MatchState): MatchState => {
+  // Nothing that reads it needs the chat, which is most of it.
+  const { chat: _, ...rest } = s;
+  return JSON.parse(JSON.stringify(rest));
+};
 
-async function apply(c: MatchCtx, next: unknown): Promise<void> {
+/** Just the game's state, plain, as `plain` makes it. */
+const plainState = (s: MatchState): unknown => JSON.parse(JSON.stringify(s.state));
+
+/** `before`: the plain state `next` came from. */
+async function apply(c: MatchCtx, next: unknown, before: unknown): Promise<void> {
   const def = defOf(c.state);
-  const before = plain(c.state).state;
   c.state.state = next;
   const callouts = def.callouts?.(before, next) ?? [];
-  const world = main(c.client()).world;
+  const { world, arcade } = main(c.client());
   for (const line of callouts) await world.callout(c.state.id, line.player, line.text).catch(() => {});
-  pushFrames(c);
-  await reportStatus(c);
+  // One copy for the frames and the world.
+  const s = plain(c.state);
+  pushFrames(c, s);
+  await reportStatus(c, s);
+  // `arcade` calls off a held game that stops moving on.
+  if (def.holdPlayers !== false) await arcade.moved(c.state.id).catch(() => {});
   const out = def.outcome(next);
   if (out) await finish(c, out);
 }
 
 /** The live status over each player's head in the world, and the arena's scoreboard. */
-async function reportStatus(c: MatchCtx): Promise<void> {
-  const s = plain(c.state);
+async function reportStatus(c: MatchCtx, s: MatchState): Promise<void> {
   const def = defOf(s);
-  const now = Date.now();
-  const status = Object.fromEntries(
-    s.players.map((p) => [p.userId, def.status?.(s.state, p.userId, now) ?? null]),
+  const update = publicStatus(
+    def,
+    s.state,
+    s.players.map((p) => p.userId),
+    watchersOf(c, s),
+    Date.now(),
   );
   await main(c.client())
-    .world.gameStatus(s.id, {
-      status,
-      board: def.board?.(s.state, now) ?? null,
-      watchers: watchersOf(c, s),
-      headline: def.headline?.(s.state, now) ?? null,
-      endsAt: def.endsAt?.(s.state) ?? null,
-    })
+    .world.gameStatus(s.id, update)
     .catch(() => {});
 }
 

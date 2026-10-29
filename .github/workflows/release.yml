@@ -26,6 +26,30 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+  # release-please links each change to its commit but not to who made it: credit the authors
+  # on the release PR, so the changelog and "What's new" in the game name them. Runs again
+  # whenever release-please rewrites the PR.
+  credit:
+    needs: release-please
+    if: needs.release-please.outputs.prs_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun server/scripts/changelog-authors.ts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          git diff --quiet CHANGELOG.md && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore: credit changelog authors"
+          git push
+
   # The desktop app: a universal build, signed, notarized, and its updater archive signed; the
   # .dmg, .app.tar.gz, .sig and latest.json go on this release, where installed apps look for updates.
   app:
@@ -44,6 +68,16 @@ jobs:
         with:
           workspaces: app/desktop/src-tauri
       - run: bun install --frozen-lockfile --ignore-scripts
+      # tauri-action merges into an existing latest.json and keeps its darwin signatures, so a rerun would
+      # replace the update archive but leave the old run's signature on it: start this release's afresh.
+      - name: Drop latest.json from a previous run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --json assets -q '.assets[].name' | grep -qx latest.json; then
+            gh release delete-asset "$TAG" latest.json --yes
+          fi
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -77,12 +111,14 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
         run: |
           set -euo pipefail
+          # stapler looks the ticket up on Apple's CloudKit, which drops connections now and then.
+          retry() { for _ in 1 2 3; do "$@" && return; sleep 20; done; return 1; }
           dir=$(mktemp -d)
           dmg="$dir/Tokenmaxxing_${VERSION}_universal.dmg"
           gh release download "$TAG" --pattern "$(basename "$dmg")" --dir "$dir"
           xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" --wait
-          xcrun stapler staple "$dmg"
+          retry xcrun stapler staple "$dmg"
           cp "$dmg" "$dir/Tokenmaxxing.dmg"
           gh release upload "$TAG" "$dmg" "$dir/Tokenmaxxing.dmg" --clobber
       # What someone clicking Download gets: this version, and macOS must accept the disk image and the
@@ -92,16 +128,18 @@ jobs:
           VERSION: ${{ needs.release-please.outputs.version }}
         run: |
           set -euo pipefail
+          # stapler looks the ticket up on Apple's CloudKit, which drops connections now and then.
+          retry() { for _ in 1 2 3; do "$@" && return; sleep 20; done; return 1; }
           dir=$(mktemp -d)
           curl -fsSL -o "$dir/installer.dmg" \
             "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/Tokenmaxxing.dmg"
           spctl -a -vv -t open --context context:primary-signature "$dir/installer.dmg"
-          xcrun stapler validate "$dir/installer.dmg"
+          retry xcrun stapler validate "$dir/installer.dmg"
           hdiutil attach -nobrowse -readonly -mountpoint "$dir/mnt" "$dir/installer.dmg"
           app="$dir/mnt/Tokenmaxxing.app"
           test "$(defaults read "$app/Contents/Info.plist" CFBundleShortVersionString)" = "$VERSION"
           codesign --verify --deep --strict -vv "$app"
-          xcrun stapler validate "$app"
+          retry xcrun stapler validate "$app"
           spctl -a -vv -t exec "$app"
           codesign -d --entitlements - "$app/Contents/MacOS/tokenmaxxing-helper" | grep -q allow-jit
           hdiutil detach "$dir/mnt"
@@ -124,7 +162,7 @@ jobs:
             minisign -V -p "$dir/key.pub" -m "$dir/update" -x "$dir/update.minisig"
           done
 
-  # The CLI for linked computers (WORKHORSE.md): a binary per platform and their checksums on this
+  # The CLI for linked computers (ARCHITECTURE.md, "Linked computers"): a binary per platform and their checksums on this
   # release, where the server's /install.sh downloads them from. On a Mac, so Bun signs the Mac ones.
   cli:
     needs: release-please

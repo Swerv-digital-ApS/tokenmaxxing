@@ -1,4 +1,5 @@
 import type { Server, WebSocketHandler } from "bun";
+import { isTruthy } from "hanzio";
 import { RateLimiter } from "./rate-limit.ts";
 
 /** Browsers and the menu bar app reach actors under this path, on our own origin. */
@@ -20,7 +21,7 @@ interface Upstream {
   ip: string;
   socket?: WebSocket;
   /** Messages from the client that arrived before the engine socket opened. */
-  pending: (string | Uint8Array)[];
+  pending: (string | Uint8Array<ArrayBuffer>)[];
 }
 
 /**
@@ -87,7 +88,7 @@ export function rivetProxy(
       const protocols = (req.headers.get("sec-websocket-protocol") ?? "")
         .split(",")
         .map((p) => p.trim())
-        .filter(Boolean);
+        .filter(isTruthy);
       const upgraded = server.upgrade(req, {
         data: { target: `ws://${engine}${path}${url.search}`, protocols, ip, pending: [] },
         headers: protocols[0] ? { "Sec-WebSocket-Protocol": protocols[0] } : undefined,

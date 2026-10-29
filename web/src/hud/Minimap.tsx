@@ -1,11 +1,12 @@
 import type { GameMap } from "@tokenmaxxing/core/maps.ts";
 import { mapOf } from "@tokenmaxxing/core/world.ts";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { C } from "../art/palette.ts";
-import { zoom } from "../game/camera.ts";
+import { viewHooks, zoom } from "../game/camera.ts";
 import { buildings, companyOnPlot } from "../game/houses.ts";
 import { walkTo } from "../game/input.ts";
 import { roomName, world } from "../game/world.ts";
+import { graphics } from "../settings/graphics.ts";
 import { useHud } from "../store.ts";
 
 /** Widest the map may be, in CSS pixels; each tile gets a whole number of pixels. */
@@ -22,6 +23,30 @@ const COLORS: Record<string, string> = {
   _: C.floor,
   "=": C.rug,
   x: C.rugLight,
+  R: C.rugLight,
+  // The raid: its gate in town, and the dungeon's stone, dais, desks and torches.
+  G: C.ink,
+  q: "#2f2b3a",
+  Z: "#5d5670",
+  l: C.metalLight,
+  r: C.metal,
+  j: "#e9733d",
+};
+
+/** An office's wallpaper and floor by id (`decor.ts`): one colour for the whole tile, near the art's. */
+const WALL_COLORS: Record<string, string> = {
+  hygge: "#f5e3bd",
+  nyhavn: "#d9a642",
+  rundetaarn: "#a14d3b",
+  jacobsen: "#9fb59a",
+  tivoli: "#1f2a54",
+};
+const FLOOR_COLORS: Record<string, string> = {
+  linoleum: "#7fa88a",
+  parquet: "#6f4326",
+  fiskebenet: "#dcc08e",
+  checker: "#a9a7a6",
+  bornholm: "#7c828c",
 };
 
 const bases = new WeakMap<GameMap, HTMLCanvasElement>();
@@ -34,9 +59,19 @@ function base(map: GameMap, scale: number): HTMLCanvasElement {
   canvas.width = map.width * scale;
   canvas.height = map.height * scale;
   const g = canvas.getContext("2d")!;
+  const colors: Record<string, string> = {
+    ...COLORS,
+    ...(map.decor?.wall && WALL_COLORS[map.decor.wall] && { W: WALL_COLORS[map.decor.wall]! }),
+    ...(map.decor?.floor && FLOOR_COLORS[map.decor.floor] && { _: FLOOR_COLORS[map.decor.floor]! }),
+  };
   for (let y = 0; y < map.height; y++)
     for (let x = 0; x < map.width; x++) {
-      g.fillStyle = COLORS[map.at(map.x0 + x, map.y0 + y)] ?? (map.id === "town" ? C.grass : C.woodDark);
+      const ch = map.at(map.x0 + x, map.y0 + y);
+      // Only a wall's face has the wallpaper (the game's own rule); its top stays plain.
+      const face =
+        ch !== "W" ||
+        (!"WR".includes(map.at(map.x0 + x, map.y0 + y + 1)) && map.contains(map.x0 + x, map.y0 + y + 1));
+      g.fillStyle = (face ? colors[ch] : COLORS[ch]) ?? (map.id === "town" ? C.grass : C.woodDark);
       g.fillRect(x * scale, y * scale, scale, scale);
     }
   bases.set(map, canvas);
@@ -49,14 +84,25 @@ export function Minimap() {
   const room = useHud((s) => s.room);
   const myCompany = useHud((s) => s.me?.company?.id);
   useHud((s) => s.companies); // the town grows with them
+  // Turning the view is the 3D renderer's.
+  const turnable = useSyncExternalStore(graphics.subscribe, () => graphics.effective().renderer === "3d");
   const map = mapOf(room);
   const scale = Math.max(1, Math.floor(MAX_WIDTH / map.width));
 
   useEffect(() => {
+    // What the last drawing showed: it's only drawn again when one of them changed.
+    let drawn: { map: GameMap; companies: typeof world.companies; avatars: string } | null = null;
     const draw = () => {
       const g = ref.current?.getContext("2d");
       if (!g) return;
-      g.drawImage(base(map, scale), 0, 0);
+      // As it is now: a drop or a take makes the room a new map.
+      const now = mapOf(room);
+      const avatars = `${world.selfId}:${[...world.avatars.values()]
+        .map((a) => `${a.info.id} ${a.x} ${a.y} ${a.info.online}`)
+        .join()}`;
+      if (drawn?.map === now && drawn.companies === world.companies && drawn.avatars === avatars) return;
+      drawn = { map: now, companies: world.companies, avatars };
+      g.drawImage(base(now, scale), 0, 0);
       for (const b of buildings(map)) {
         const company = b.plot === null ? null : companyOnPlot(b.plot);
         g.fillStyle = b.plot === null ? C.leaf : company?.id === myCompany ? C.flowerYellow : C.roofRed;
@@ -76,13 +122,33 @@ export function Minimap() {
     draw();
     const id = setInterval(draw, 200);
     return () => clearInterval(id);
-  }, [map, scale, myCompany]);
+  }, [room, map, scale, myCompany]);
 
   return (
     <section className="panel minimap" aria-label="Map">
       <header>
         <span>🗺 {roomName(room)}</span>
         <span className="zoom">
+          {turnable && (
+            <>
+              <button
+                type="button"
+                aria-label="Turn the view left"
+                title="Turn the view left (Q)"
+                onClick={() => viewHooks.rotate?.(-1)}
+              >
+                ⟲
+              </button>
+              <button
+                type="button"
+                aria-label="Turn the view right"
+                title="Turn the view right (R)"
+                onClick={() => viewHooks.rotate?.(1)}
+              >
+                ⟳
+              </button>
+            </>
+          )}
           <button type="button" aria-label="Zoom out" title="Zoom out (−)" onClick={() => zoom(-1)}>
             −
           </button>

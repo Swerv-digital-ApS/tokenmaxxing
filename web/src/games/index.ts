@@ -3,6 +3,7 @@ import type { ComponentType } from "react";
 import { Dice } from "./dice.tsx";
 import { Hype } from "./hype.tsx";
 import { Spr } from "./spr.tsx";
+import { Sprint } from "./sprint.tsx";
 import { Tokenmaxxing } from "./tokenmaxxing.tsx";
 import type { GameProps } from "./types.ts";
 
@@ -12,5 +13,6 @@ export const COMPONENTS: Partial<Record<GameId, ComponentType<GameProps<any>>>> 
   spr: Spr,
   hype: Hype,
   dice: Dice,
+  sprint: Sprint,
   tokenmaxxing: Tokenmaxxing,
 };

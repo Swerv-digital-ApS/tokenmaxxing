@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { MINUTE_CAP } from "@tokenmaxxing/core/games/tokenmaxxing.ts";
 import type { Client } from "rivetkit/client";
 import {
   cleanExcludedEvents,
@@ -148,16 +149,50 @@ test("expanded bot cleanup upgrades earlier exclusions and preserves regular Cur
         [id!, model!],
       );
     }
+    db.run(
+      `INSERT INTO events (source, session_id, message_id, timestamp, day, model, message_type,
+      input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens)
+      VALUES ('grok_bot', 's', 'kept-bot', 1, '2026-09-29', 'grok-bot-default', 'assistant', 100, 50, 0, 0)`,
+    );
     await migrateEvents(sql);
     // Startup leaves them alone: the cleanup runs in the background, in batches.
-    expect(db.query("SELECT COUNT(*) AS n FROM events").get()).toEqual({ n: 4 });
+    expect(db.query("SELECT COUNT(*) AS n FROM events").get()).toEqual({ n: 5 });
     await cleanExcludedEvents(sql);
-    expect(db.query("SELECT model FROM events").all()).toEqual([{ model: "grok-4.7-high" }]);
+    expect(db.query("SELECT source, model FROM events ORDER BY source, model").all()).toEqual([
+      { source: "cursor_local", model: "grok-4.7-high" },
+      { source: "grok_bot", model: "grok-bot-default" },
+    ]);
     expect(db.query("SELECT day FROM pending_usage_days").all()).toEqual([{ day: "2026-09-29" }]);
     await flushUsageReports(sql, async () => {});
     await migrateEvents(sql);
     await cleanExcludedEvents(sql);
     expect(db.query("SELECT day FROM pending_usage_days").all()).toEqual([]);
+  } finally {
+    db.close();
+  }
+});
+
+test("a finished exact-list cleanup scans again so leftover Cursor-tagged Grok Bot rows are removed", async () => {
+  const { db, sql } = memorySql();
+  try {
+    await migrateEvents(sql);
+    db.run("INSERT OR IGNORE INTO usage_report_migrations VALUES (3)");
+    db.run("INSERT INTO excluded_cleanup VALUES (100)");
+    const insert = db.prepare(`INSERT INTO events (id, source, session_id, message_id, timestamp, day, model,
+      message_type, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens)
+      VALUES (?, ?, 's', ?, 1, '2026-09-29', ?, 'assistant', 1, 0, 0, 0)`);
+    // Below the old cursor, so a resume without a reset would leave the bot row in place.
+    insert.run(50, "cursor_local", "old", "grok-bot-future");
+    insert.run(60, "cursor_local", "keep", "grok-4.7-high");
+    insert.run(70, "grok_bot", "new", "grok-bot-future");
+    await cleanExcludedEvents(sql);
+    expect(db.query("SELECT id, source FROM events ORDER BY id").all()).toEqual([
+      { id: 60, source: "cursor_local" },
+      { id: 70, source: "grok_bot" },
+    ]);
+    expect(db.query("SELECT version FROM usage_report_migrations WHERE version = 4").get()).toEqual({
+      version: 4,
+    });
   } finally {
     db.close();
   }
@@ -301,7 +336,7 @@ test("grouped rollups preserve per-model caps, activity, and indexed recent-agen
   try {
     db.run(`CREATE TABLE events (day TEXT, model TEXT, timestamp INTEGER, message_type TEXT,
       session_id TEXT, agent_id TEXT, input_tokens INTEGER, output_tokens INTEGER,
-      cache_creation_tokens INTEGER, cache_read_tokens INTEGER, cost_cents REAL)`);
+      cache_creation_tokens INTEGER, cache_read_tokens INTEGER, cost_cents REAL, source TEXT)`);
     db.run("CREATE INDEX events_day ON events (day, message_type)");
     db.run(
       "CREATE INDEX events_assistant_time ON events (timestamp, session_id, agent_id) WHERE message_type = 'assistant'",
@@ -318,7 +353,7 @@ test("grouped rollups preserve per-model caps, activity, and indexed recent-agen
       creation = 0,
       read = 0,
     ) =>
-      db.run("INSERT INTO events VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL)", [
+      db.run("INSERT INTO events VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, 'claude_code')", [
         day,
         model,
         time,
@@ -393,10 +428,16 @@ test("grouped rollups preserve per-model caps, activity, and indexed recent-agen
       peakAgents: 2,
       capped: USAGE_MINUTE_CAP + 600,
     });
-    expect(recent).toEqual([42, now - 60_000, 2]);
-    // Both live queries use the partial index; neither scans all historic assistant events.
-    for (const q of queries.slice(-2)) {
-      const args = q.includes("timestamp > ?") ? [now - 600_000] : [];
+    // Two agents, their burn (the minute's capped tokens over the last 10 minutes), and the last hour's
+    // burn for the 429 Cop: that minute, capped like a battle's.
+    expect(recent).toEqual([42, now - 60_000, 2, MINUTE_CAP / 10, MINUTE_CAP]);
+    // The live queries use the partial index; none scans all historic assistant events.
+    for (const q of queries.slice(-3)) {
+      const args = q.includes("timestamp > ?")
+        ? [now - 600_000]
+        : q.includes("timestamp >= ?")
+          ? [MINUTE_CAP, MINUTE_CAP, now - 600_000, now + 1, now - 3_600_000, now, now - 3_600_000, now + 1]
+          : [];
       const plan = db.query(`EXPLAIN QUERY PLAN ${q}`).all(...args) as { detail: string }[];
       expect(
         plan.some(

@@ -1,10 +1,13 @@
 import { rm } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { AppState, Command, LinkComputer, Message } from "@tokenmaxxing/core/protocol.ts";
 import type { CollectOptions } from "@tokenmaxxing/core/sync/collect.ts";
 import { emptyState, loadState } from "@tokenmaxxing/core/sync/state.ts";
 import { sync } from "@tokenmaxxing/core/sync/sync.ts";
 import type { SyncState, TokenEvent } from "@tokenmaxxing/core/types.ts";
 import type { registry } from "@tokenmaxxing/server/registry";
+import { trimTrailingSlash, typedSwitch } from "hanzio";
 import { createClient } from "rivetkit/client";
 
 /** Often enough that your character sits down at the desk soon after your agents start. */
@@ -12,7 +15,16 @@ const SYNC_INTERVAL_MS = 2 * 60_000;
 /** During a Tokenmaxxing battle, so the scoreboard moves while you burn. */
 const BATTLE_SYNC_MS = 10_000;
 
-export interface HelperOptions {
+/** Where the desktop app keeps its sync state, unless `TOKENMAXXING_STATE_DIR` says (`main.ts`). */
+export function appStateDir(platform = process.platform, env = process.env, home = homedir()): string {
+  if (platform === "darwin") return join(home, "Library", "Application Support", "Tokenmaxxing");
+  if (platform === "win32") return join(env.LOCALAPPDATA || join(home, "AppData", "Local"), "Tokenmaxxing");
+  return join(env.XDG_DATA_HOME || join(home, ".local", "share"), "Tokenmaxxing");
+}
+/** v2: the world started from a fresh server, so every Mac re-reads its full history into it. */
+export const APP_STATE_FILE = "state.v2.json";
+
+interface HelperOptions {
   statePath: string;
   write: (msg: Message) => void;
   log?: (msg: string) => void;
@@ -25,11 +37,24 @@ class ApiError extends Error {}
 
 type Client = ReturnType<typeof createClient<typeof registry>>;
 
-/** Actor errors carry a code; anything without one is the network. */
-function apiError(err: unknown): ApiError {
+/** An actor error's code, for people; null for anything without one, which is the network. */
+export function errorCode(err: unknown): string | null {
   const code = (err as { code?: unknown } | null)?.code;
-  return new ApiError(typeof code === "string" && code !== "internal_error" ? code : "offline");
+  return typeof code === "string" && code !== "internal_error" ? code : null;
 }
+
+const apiError = (err: unknown): ApiError => new ApiError(errorCode(err) ?? "offline");
+
+/**
+ * A client for the server at `serverUrl`. No metadata lookup: our server is the endpoint, and the
+ * lookup retries forever when offline.
+ */
+export const clientFor = (serverUrl: string): Client =>
+  createClient<typeof registry>({
+    endpoint: `${trimTrailingSlash(serverUrl)}/api/rivet`,
+    devtools: false,
+    disableMetadataLookup: true,
+  });
 
 /**
  * The menu bar app's engine: sign up once, then send new local usage in the
@@ -70,38 +95,31 @@ export class Helper {
   }
 
   private async run(cmd: Command): Promise<unknown> {
-    switch (cmd.cmd) {
-      case "init":
-        this.serverUrl = cmd.serverUrl.replace(/\/+$/, "");
-        // No metadata lookup: our server is the endpoint, and the lookup retries forever when offline.
-        this.client = createClient<typeof registry>({
-          endpoint: `${this.serverUrl}/api/rivet`,
-          devtools: false,
-          disableMetadataLookup: true,
-        });
+    return typedSwitch(cmd, "cmd", {
+      init: async (cmd) => {
+        this.serverUrl = trimTrailingSlash(cmd.serverUrl);
+        this.client = clientFor(this.serverUrl);
         this.syncState = await loadState(this.opts.statePath);
         if (cmd.token) await this.signIn(cmd.token);
         else this.state.phase = "onboarding";
-        return;
-      case "signUp": {
+      },
+      signUp: async (cmd) => {
         const r = await this.call(() => this.api().town.getOrCreate(["main"]).signUp(cmd.name));
         this.opts.write({ event: "token", token: r.token });
         await this.signIn(r.token);
-        return;
-      }
-      case "syncNow":
+      },
+      syncNow: () => {
         // History imports can outlive the shell command timeout. Acknowledge the start now;
         // tick refreshes the UI when the shared background run finishes.
         void this.tick().catch((err) => this.log(`sync now failed: ${String(err)}`));
-        return;
-      case "openWorld":
-        return { code: await this.call(() => this.player().mintLoginCode()) };
-      case "linkComputer": {
+      },
+      openWorld: async () => ({ code: await this.call(() => this.player().mintLoginCode()) }),
+      linkComputer: async (): Promise<LinkComputer> => {
         const code = await this.call(() => this.player().mintLinkCode());
         const command = `curl -fsSL ${this.serverUrl}/install.sh | sh -s -- link ${code}`;
-        return { code, command } satisfies LinkComputer;
-      }
-    }
+        return { code, command };
+      },
+    });
   }
 
   private api(): Client {

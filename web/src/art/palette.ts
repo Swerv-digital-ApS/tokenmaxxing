@@ -68,11 +68,12 @@ export const OUTFITS: [string, string][] = [
   ["#3c4454", "#262c38"],
   ["#f28bb2", "#cf6690"],
   ["#f2f0ea", "#cfcac0"],
-  // From the shop: hacker hoodie, sharp suit, galaxy jacket, gold suit.
+  // From the shop: hacker hoodie, sharp suit, galaxy jacket, gold suit; then server-rack armour (level 20).
   ["#1f2a24", "#3ddc84"],
   ["#2c3142", "#1b1f2b"],
   ["#5b3fbf", "#e86bd8"],
   ["#e9b73d", "#b98a1f"],
+  ["#5d6470", "#3ddc84"],
 ];
 export const PANTS = [
   "#3d4a6b",
@@ -87,4 +88,22 @@ export const PANTS = [
   "#1b1f2b",
   "#2a2150",
   "#8f6a17",
+  "#3a3f4b",
 ];
+
+/** `#rrggbb` as its channels. */
+export const rgbOf = (h: string): [number, number, number] => {
+  const n = Number.parseInt(h.slice(1), 16);
+  return [n >> 16, (n >> 8) & 255, n & 255];
+};
+
+const hex2 = (v: number) => v.toString(16).padStart(2, "0");
+/** Channels (0–255 each) as `#rrggbb`. */
+export const hexOf = (r: number, g: number, b: number): string => `#${hex2(r)}${hex2(g)}${hex2(b)}`;
+
+/** `#rrggbb` moved towards white (`f` > 0) or black (`f` < 0) by a fraction. */
+export function shade(h: string, f: number): string {
+  const to = f > 0 ? 255 : 0;
+  const [r, g, b] = rgbOf(h).map((v) => Math.round(v + (to - v) * Math.abs(f)));
+  return hexOf(r!, g!, b!);
+}

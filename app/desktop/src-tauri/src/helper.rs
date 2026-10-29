@@ -226,6 +226,12 @@ fn spawn() -> std::io::Result<Child> {
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(log_file());
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        // The background helper must not open a console on every launch or restart.
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
     cmd.spawn()
 }
 
@@ -233,12 +239,14 @@ fn spawn() -> std::io::Result<Child> {
 /// app's read positions. Restart the app to pick up TypeScript changes.
 #[cfg(debug_assertions)]
 fn command() -> Command {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let bun = format!("{home}/.bun/bin/bun");
-    let mut cmd = Command::new(if std::path::Path::new(&bun).exists() {
-        bun.as_str()
+    let home = dirs::home_dir().expect("the home directory");
+    let bun = home
+        .join(".bun/bin")
+        .join(format!("bun{}", std::env::consts::EXE_SUFFIX));
+    let mut cmd = Command::new(if bun.exists() {
+        bun.as_os_str()
     } else {
-        "bun"
+        std::ffi::OsStr::new("bun")
     });
     cmd.arg(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -246,7 +254,9 @@ fn command() -> Command {
     ))
     .env(
         "TOKENMAXXING_STATE_DIR",
-        format!("{home}/Library/Application Support/Tokenmaxxing Dev"),
+        dirs::data_local_dir()
+            .expect("the data directory")
+            .join("Tokenmaxxing Dev"),
     );
     cmd
 }
@@ -255,14 +265,22 @@ fn command() -> Command {
 #[cfg(not(debug_assertions))]
 fn command() -> Command {
     let exe = std::env::current_exe().expect("the app's own path");
-    Command::new(exe.with_file_name("tokenmaxxing-helper"))
+    Command::new(exe.with_file_name(format!(
+        "tokenmaxxing-helper{}",
+        std::env::consts::EXE_SUFFIX
+    )))
 }
 
 /// The helper's stderr, in ~/Library/Logs/Tokenmaxxing/helper.log.
 /// ponytail: truncated at 5 MB on start, not rotated; add rotation if it's ever needed.
 fn log_file() -> Stdio {
-    let dir = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
-        .join("Library/Logs/Tokenmaxxing");
+    #[cfg(target_os = "macos")]
+    let dir = dirs::home_dir().map(|home| home.join("Library/Logs/Tokenmaxxing"));
+    #[cfg(not(target_os = "macos"))]
+    let dir = dirs::data_local_dir().map(|data| data.join("Tokenmaxxing/logs"));
+    let Some(dir) = dir else {
+        return Stdio::null();
+    };
     let path = dir.join("helper.log");
     let _ = std::fs::create_dir_all(&dir);
     if std::fs::metadata(&path)

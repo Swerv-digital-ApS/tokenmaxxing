@@ -1,7 +1,8 @@
 import { PLOT_H, PLOT_W } from "@tokenmaxxing/core/maps.ts";
 import { type Brand, HOUSE_TIERS, TILE } from "@tokenmaxxing/core/world.ts";
-import { C } from "./palette.ts";
-import { bake, cached, type Pen } from "./pixels.ts";
+import { clamp } from "hanzio";
+import { C, shade } from "./palette.ts";
+import { bake, once, type Pen } from "./pixels.ts";
 
 /**
  * Houses are drawn from rectangles on a 7×5-tile lot, door in the middle of the
@@ -69,13 +70,6 @@ const SHACK: Style = {
 /** The basement's only colour is its hatch doors: wood, or the brand's roof colour. */
 const BASEMENT: Style = { ...SHACK, roof: C.wood, roofDark: C.woodDark };
 const STYLES = [BASEMENT, SHACK, COTTAGE, HOUSE, VILLA, MANSION];
-
-/** `#rrggbb` lightened (`by` > 0) or darkened (`by` < 0) by a fraction. */
-function shade(hex: string, by: number): string {
-  const n = Number.parseInt(hex.slice(1), 16);
-  const ch = (v: number) => Math.round(by < 0 ? v * (1 + by) : v + (255 - v) * by);
-  return `#${[n >> 16, (n >> 8) & 255, n & 255].map((v) => ch(v).toString(16).padStart(2, "0")).join("")}`;
-}
 
 const branded = (b: Brand): Style => ({
   wall: b.wall,
@@ -350,7 +344,7 @@ const plans = new Map<string, Plan>();
 
 /** A company's house by tier (0 basement … 5 mansion) and brand, bottom edge on the lot's bottom. */
 export function house(tier: number, brand: Brand | null): Plan {
-  const t = Math.max(0, Math.min(tier, HOUSE_TIERS - 1));
+  const t = clamp(tier, 0, HOUSE_TIERS - 1);
   const key = brand
     ? `${t}:${brand.roof}${brand.wall}${brand.trim}${brand.plaque}:${brand.logo !== null}`
     : `${t}`;
@@ -359,33 +353,30 @@ export function house(tier: number, brand: Brand | null): Plan {
   return plan;
 }
 
-export const inn = cached(
-  () => "inn",
-  () => {
-    const W = 7 * TILE;
-    const H = 4 * TILE + 14;
-    const s: Style = {
-      wall: "#e9d7b5",
-      wallDark: "#d3bd96",
-      roof: "#4f9b6a",
-      roofDark: "#3b7a52",
-      trim: C.woodDark,
-    };
-    return bake(W, H, (p) => {
-      p.rect(2, H - 3, W - 4, 3, C.shadow);
-      roof(p, 0, W, 0, H - 38, s);
-      p.rect(4, H - 36, W - 8, 36, C.ink);
-      p.rect(5, H - 36, W - 10, 35, s.wall);
-      for (let x = 5; x < W - 5; x += 6) p.rect(x, H - 36, 1, 35, s.wallDark);
-      window_(p, 12, H - 26);
-      window_(p, 30, H - 26);
-      window_(p, W - 44, H - 26);
-      window_(p, W - 24, H - 26);
-      door(p, W / 2, H - 1);
-      // Hanging sign.
-      p.rect(W / 2 + 10, H - 34, 1, 4, C.ink);
-      p.rect(W / 2 + 6, H - 30, 12, 7, C.ink);
-      p.rect(W / 2 + 7, H - 29, 10, 5, C.flowerYellow);
-    });
-  },
-);
+export const inn = once(() => {
+  const W = 7 * TILE;
+  const H = 4 * TILE + 14;
+  const s: Style = {
+    wall: "#e9d7b5",
+    wallDark: "#d3bd96",
+    roof: "#4f9b6a",
+    roofDark: "#3b7a52",
+    trim: C.woodDark,
+  };
+  return bake(W, H, (p) => {
+    p.rect(2, H - 3, W - 4, 3, C.shadow);
+    roof(p, 0, W, 0, H - 38, s);
+    p.rect(4, H - 36, W - 8, 36, C.ink);
+    p.rect(5, H - 36, W - 10, 35, s.wall);
+    for (let x = 5; x < W - 5; x += 6) p.rect(x, H - 36, 1, 35, s.wallDark);
+    window_(p, 12, H - 26);
+    window_(p, 30, H - 26);
+    window_(p, W - 44, H - 26);
+    window_(p, W - 24, H - 26);
+    door(p, W / 2, H - 1);
+    // Hanging sign.
+    p.rect(W / 2 + 10, H - 34, 1, 4, C.ink);
+    p.rect(W / 2 + 6, H - 30, 12, 7, C.ink);
+    p.rect(W / 2 + 7, H - 29, 10, 5, C.flowerYellow);
+  });
+});

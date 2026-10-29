@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Tokenmaxxing</string>
+    <string name="scan">Scan</string>
+    <string name="paste">Paste</string>
+    <string name="more">More options</string>
+    <string name="reload">Reload town</string>
+    <string name="sign_out">Sign out on this phone</string>
+    <string name="about">About this companion</string>
+    <string name="connecting">Connecting to your town…</string>
+    <string name="network_error">Could not reach the town. Check your connection, then choose Reload town in the menu.</string>
+    <string name="paste_title">Connect your account</string>
+    <string name="paste_message">On your computer: player card → Computers → Connect phone. Paste that sign-in code or QR link below.</string>
+    <string name="code_hint">Sign-in code or QR link</string>
+    <string name="sign_in">Sign in</string>
+    <string name="invalid_code">Use a sign-in code or QR link from your Tokenmaxxing town.</string>
+    <string name="scan_error">Scanning is unavailable. You can paste the sign-in code instead. Scanning needs Google Play services.</string>
+    <string name="sign_out_message">Remove the game session from this phone? Your account and computer syncing are kept.</string>
+    <string name="about_message">Play and view your existing account. Your computers keep syncing usage. Sessions last up to 30 days. On your computer, choose Connect phone on your player card.</string>
+</resources>

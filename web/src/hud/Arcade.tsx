@@ -3,9 +3,14 @@ import { GAMES, gameOf } from "@tokenmaxxing/core/games/index.ts";
 import { MAX_STAKE, SPLITS, type Split } from "@tokenmaxxing/core/games/payouts.ts";
 import type { GameId } from "@tokenmaxxing/core/games/types.ts";
 import type { Lobby, MatchInfo, TableView } from "@tokenmaxxing/core/games/wire.ts";
+import { BIG_BLIND, BUY_IN, SEATS, SMALL_BLIND } from "@tokenmaxxing/core/poker.ts";
+import { SPOTS } from "@tokenmaxxing/core/roulette.ts";
 import { namesIn } from "@tokenmaxxing/core/world.ts";
+import { typedSwitch, typedSwitchGroup } from "hanzio";
 import { useEffect, useState } from "react";
-import { arcade, openMatch, town } from "../net.ts";
+import { joinRoulette, send } from "../game/input.ts";
+import { world } from "../game/world.ts";
+import { arcade, conn, openMatch } from "../net.ts";
 import { hud, useHud } from "../store.ts";
 import { Chat } from "./Chat.tsx";
 import { MentionInput } from "./MentionInput.tsx";
@@ -15,7 +20,11 @@ const STAKES = [0, 10, 50, 100, 250];
 
 const gameName = (id: GameId) => GAMES[id]?.name ?? id;
 const optionsText = (t: { game: GameId; options: Record<string, string | number> }) =>
-  t.game === "tokenmaxxing" ? ` · ${minutesText(Number(t.options.minutes))}` : "";
+  typedSwitch(t.game, {
+    tokenmaxxing: () => ` · ${minutesText(Number(t.options.minutes))}`,
+    sprint: () => ` · ${t.options.seconds}s`,
+    ...typedSwitchGroup(t.game, ["spr", "hype", "dice"], () => ""),
+  });
 
 /** What the lobby means for me: games on, am I in one, my invites, and open tables I could sit at. */
 function lobbySummary(lobby: Lobby, me: number | undefined) {
@@ -68,6 +77,11 @@ export function ArcadePanel() {
           ▶ Back to your game
         </button>
       )}
+      <h3>The Net cafe</h3>
+      <ul className="tables">
+        <PokerRow />
+        <RouletteRow />
+      </ul>
       <h3>Open tables</h3>
       {open.length === 0 ? (
         <p className="muted small">Nobody's waiting for players right now. Open a table!</p>
@@ -102,6 +116,65 @@ export function ArcadePanel() {
   );
 }
 
+/**
+ * The Tavern's poker table, always on offer: Join takes you into the Tavern from anywhere and into a free chair
+ * (the buy-in comes out of your wallet). The seats are only known while you are in the Tavern.
+ */
+function PokerRow({ compact }: { compact?: boolean }) {
+  const seats = useHud((s) => s.poker?.seats);
+  const mine = seats?.some((s) => s?.userId === world.selfId) ?? false;
+  const seated = seats?.filter(Boolean).length;
+  return (
+    <li>
+      <span className="who">
+        🃏 Poker{!compact && ` · Hold'em ${SMALL_BLIND}/${BIG_BLIND}`}
+        <small className="muted"> {seated === undefined ? `${SEATS} seats` : `${seated}/${SEATS}`}</small>
+      </span>
+      {mine ? (
+        <small className="muted">You're seated</small>
+      ) : (
+        <button
+          type="button"
+          className="primary"
+          onClick={() => {
+            hud.set({ panel: null });
+            send(conn.pokerJoin());
+          }}
+        >
+          Join · 🪙 {BUY_IN}
+        </button>
+      )}
+    </li>
+  );
+}
+
+/**
+ * The net cafe's roulette table, always on offer and always shared: Join takes you down there from anywhere and
+ * onto a free spot. The spots are only known while you are in the net cafe.
+ */
+function RouletteRow({ compact }: { compact?: boolean }) {
+  const seats = useHud((s) => s.roulette?.seats);
+  const mine = seats?.some((s) => s.userId === world.selfId) ?? false;
+  return (
+    <li>
+      <span className="who">
+        🎡 Roulette{!compact && " · with everyone"}
+        <small className="muted">
+          {" "}
+          {seats === undefined ? `${SPOTS} spots` : `${seats.length}/${SPOTS}`}
+        </small>
+      </span>
+      {mine ? (
+        <small className="muted">You're at the table</small>
+      ) : (
+        <button type="button" className="primary" onClick={() => void joinRoulette()}>
+          Join
+        </button>
+      )}
+    </li>
+  );
+}
+
 const BOX_SHOWN = 3;
 
 /** Under the leaderboard: open tables to join, how many games are on, and a way to start one. */
@@ -117,6 +190,10 @@ export function GamesBox() {
       <button type="button" className="miniboard-title" onClick={openArcade}>
         🎮 Games <span className="muted">· {playing.length} playing ›</span>
       </button>
+      <ul>
+        <PokerRow compact />
+        <RouletteRow compact />
+      </ul>
       {open.length === 0 ? (
         <p className="muted small">No open tables right now.</p>
       ) : (
@@ -279,9 +356,20 @@ function YourTable({ table }: { table: TableView }) {
 }
 
 /** Opening a table: the game, seats, stake, split, open or invite only, and who to invite. */
-export function NewTable({ invite }: { invite?: number }) {
+export function NewTable({
+  invite,
+  inviteName,
+  game: preferred,
+}: {
+  invite?: number;
+  inviteName?: string;
+  /** A basement cabinet's game: picked to start with, and its open tables listed first. */
+  game?: GameId;
+}) {
   const wallet = useHud((s) => s.wallet);
-  const [game, setGame] = useState<GameId>("spr");
+  const lobby = useHud((s) => s.lobby);
+  const me = useHud((s) => s.me?.userId);
+  const [game, setGame] = useState<GameId>(preferred ?? "spr");
   const def = GAMES[game]!;
   const [seats, setSeats] = useState(def.players.max);
   const [wanted, setStake] = useState(10);
@@ -289,14 +377,11 @@ export function NewTable({ invite }: { invite?: number }) {
   const [open, setOpen] = useState(invite === undefined);
   const [names, setNames] = useState("");
   const [minutes, setMinutes] = useState(60);
-  const [inviteName, setInviteName] = useState<string | null>(null);
+  const [seconds, setSeconds] = useState(30);
   const { error, run } = useRun();
   useEffect(() => {
     setSeats(invite !== undefined ? def.players.min : def.players.max);
   }, [def, invite]);
-  useEffect(() => {
-    if (invite !== undefined) void town.profile(invite, "today").then((p) => setInviteName(p.name));
-  }, [invite]);
   const cap = Math.min(MAX_STAKE, Math.floor((wallet?.balance ?? 0) / 2));
   const stake = Math.min(wanted, cap);
 
@@ -308,10 +393,20 @@ export function NewTable({ invite }: { invite?: number }) {
       split,
       open,
       invite: people,
-      options: game === "tokenmaxxing" ? { minutes } : {},
+      options: typedSwitch(game, {
+        tokenmaxxing: () => ({ minutes }),
+        sprint: () => ({ seconds }),
+        ...typedSwitchGroup(game, ["spr", "hype", "dice"], () => ({})),
+      }),
     });
     hud.set({ panel: { kind: "arcade" } });
   });
+
+  const joinable = preferred
+    ? (lobby?.tables ?? []).filter(
+        (t) => t.open && t.game === preferred && !t.seated.some((p) => p.userId === me),
+      )
+    : [];
 
   return (
     <Modal
@@ -319,6 +414,28 @@ export function NewTable({ invite }: { invite?: number }) {
       wide
       beside={<Chat />}
     >
+      {joinable.length > 0 && (
+        <>
+          <h3>Waiting for players</h3>
+          <ul className="tables">
+            {joinable.map((t) => (
+              <TableRow key={t.id} table={t}>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={run(async () => {
+                    await arcade.join(t.id);
+                    hud.set({ panel: { kind: "arcade" } });
+                  })}
+                >
+                  Join · 🪙 {t.stake}
+                </button>
+              </TableRow>
+            ))}
+          </ul>
+          <h3>Or open your own</h3>
+        </>
+      )}
       <ul className="game-picker">
         {Object.values(GAMES).map((g) => (
           <li key={g.id}>
@@ -350,6 +467,20 @@ export function NewTable({ invite }: { invite?: number }) {
                   {minutesText(Number(m))}
                 </option>
               ))}
+            </select>
+          </label>
+        )}
+        {game === "sprint" && (
+          <label>
+            How long
+            <select value={seconds} onChange={(e) => setSeconds(Number(e.target.value))}>
+              {[...(def.options?.seconds ?? [])]
+                .sort((a, b) => Number(a) - Number(b))
+                .map((n) => (
+                  <option key={n} value={n}>
+                    {n} seconds
+                  </option>
+                ))}
             </select>
           </label>
         )}
@@ -432,9 +563,9 @@ export function InviteToast() {
   const me = useHud((s) => s.me?.userId);
   const [counter, setCounter] = useState<number | null>(null);
   const { error, run } = useRun();
-  useTicker(1000, invite !== null);
   const table = lobby?.tables.find((t) => t.id === invite);
   const mine = table?.invited.find((i) => i.userId === me);
+  useTicker(1000, mine !== undefined);
   if (invite === null || !table || !mine) return null;
   const host = table.seated.find((s) => s.userId === table.host)?.name ?? "Someone";
   const left = secondsUntil(mine.expiresAt, Date.now());

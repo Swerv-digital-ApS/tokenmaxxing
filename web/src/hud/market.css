@@ -1,0 +1,153 @@
+/* Torvehallen, the market hall (Market.tsx). Class names are mk-*. `--r` is the item's rarity colour. */
+.mk-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.mk-list,
+.mk-things,
+.mk-sales {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.mk-list {
+  display: grid;
+  gap: 6px;
+}
+.mk-list > li {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--r, var(--line));
+  border-radius: 8px;
+  overflow: hidden;
+}
+.mk-list > li.open {
+  background: rgba(255, 255, 255, 0.04);
+}
+.mk-row {
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  grid-template-areas: "pic name cost" "pic where cost";
+  column-gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 2px 10px 2px 4px;
+  border: none;
+  background: none;
+  text-align: left;
+  color: inherit;
+}
+.mk-row > :first-child {
+  grid-area: pic;
+}
+.mk-name {
+  font-weight: 600;
+}
+.mk-row .mk-name {
+  grid-area: name;
+}
+.mk-row .small {
+  grid-area: where;
+}
+.mk-cost {
+  grid-area: cost;
+  color: var(--accent);
+  white-space: nowrap;
+}
+/* One listing, in a row or on its own. */
+.mk-detail {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 10px;
+}
+.mk-pic {
+  flex: none;
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mk-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.mk-info h3 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.mk-rarity {
+  color: var(--r, var(--muted));
+}
+.mk-price {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.mk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* Putting something on a free spot. */
+.mk-put {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mk-things {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.mk-things button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  padding: 4px;
+  text-align: center;
+  border-bottom: 3px solid var(--r, var(--line));
+}
+.mk-things button[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.mk-things .mk-name {
+  font-size: 12px;
+}
+.mk-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+.mk-field input {
+  width: 160px;
+}
+
+/* The sales log. */
+.mk-sales li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
+}
+.mk-sales li > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.mk-sales strong {
+  color: var(--accent);
+}

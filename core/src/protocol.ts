@@ -48,7 +48,7 @@ export interface Battle {
 }
 
 /** My tokens today from one source, as the server has them. */
-export interface SourceTokens {
+interface SourceTokens {
   source: Source;
   tokens: number;
 }

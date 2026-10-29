@@ -1,2 +1,2 @@
-# The sidecar is rebuilt by scripts/helper.sh; watching it would restart `tauri dev` in a loop.
+# The sidecar is rebuilt by scripts/helper.ts; watching it would restart `tauri dev` in a loop.
 binaries/
