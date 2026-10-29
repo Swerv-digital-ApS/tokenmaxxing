@@ -59,6 +59,76 @@ describe("Cursor sync checkpoint", () => {
     ]);
   });
 
+  test("counts a team Grok Bot row whose model is empty", async () => {
+    const ours = { owningUser: "42", owningTeam: 7 };
+    const grokUsage = {
+      inputTokens: 40_000,
+      outputTokens: 21_800,
+      cacheWriteTokens: 100,
+      cacheReadTokens: 50,
+    };
+    const teamRows = [
+      // Dashboard: Product "Grok Bot", Usage Type "Included", Model "-", Cost "-".
+      {
+        ...row(until - 2000),
+        ...ours,
+        model: "",
+        clientType: "Grok Bot",
+        kind: "Included",
+        tokenUsage: grokUsage,
+      },
+      { ...row(until - 3000), ...ours, model: null, product: "grok-bot", tokenUsage: grokUsage },
+      {
+        ...row(until - 4000),
+        ...ours,
+        model: "  ",
+        clientType: "sand",
+        tokenUsage: { inputTokens: 5, outputTokens: 0 },
+      },
+      { ...row(until - 5000), owningUser: 43, owningTeam: 7, model: "", clientType: "grok-bot" },
+      { ...row(until - 6000), ...ours, model: "composer-2.5" },
+      { ...row(until - 7000), ...ours, model: "" },
+    ];
+    const sent: TokenEvent[] = [];
+    await sync(
+      { files: {} },
+      {
+        statePath: join(directory(), "sync.json"),
+        enabled,
+        send: async (events) => {
+          sent.push(...events);
+          return send(events);
+        },
+        now: () => until,
+        cursorCredentials: credentials,
+        onError: (err) => {
+          throw err;
+        },
+        cursorFetch: (async (input: string | URL | Request, init?: RequestInit) => {
+          const url = String(input);
+          const body = JSON.parse(String(init?.body)) as { teamId?: number };
+          if (url.endsWith("/teams")) return Response.json({ teams: [{ id: 7 }] });
+          if (url.endsWith("/team")) return Response.json({ userId: 42 });
+          if (!body.teamId) return page([row()]);
+          return page(teamRows);
+        }) as typeof fetch,
+      },
+    );
+    const grok = sent.filter((e) => e.source === "grok_bot");
+    const tokens = (e: TokenEvent) =>
+      e.inputTokens + e.outputTokens + e.cacheCreationTokens + e.cacheReadTokens;
+    expect(grok.map((e) => [e.model, tokens(e)])).toEqual([
+      ["grok-bot", 61_950],
+      ["grok-bot", 61_950],
+      ["grok-bot", 5],
+    ]);
+    expect(grok.every((e) => e.costCents == null)).toBe(true);
+    expect(sent.filter((e) => e.source === "cursor_local").map((e) => e.model)).toEqual([
+      "claude-4.6-opus",
+      "composer-2.5",
+    ]);
+  });
+
   test("checks every 15 minutes, overlaps seven days, and backfills a new account", async () => {
     const requests: Record<string, unknown>[] = [];
     let accountId = "first";

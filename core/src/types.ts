@@ -26,6 +26,10 @@ export type Source = (typeof SOURCES)[number];
  * read. llm-usage-extraction reads these rows from the Cursor dashboard, including
  * the user's own usage billed to a Cursor team they belong to. Grok Bot stays at 0
  * until those rows exist.
+ *
+ * The team Usage page's Product column is `clientType` (`grok-bot`, displayed as
+ * "Grok Bot", or the older `sand`). Those rows often have an empty `model`. The
+ * reader still counts them as `grok_bot` and stores the model as `grok-bot`.
  */
 export function isGrokBotModel(model: string): boolean {
   return model === "grok-bot" || model.startsWith("grok-bot-");
