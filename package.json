@@ -53,5 +53,8 @@
     "@tauri-apps/cli": "^2",
     "@types/bun": "latest",
     "typescript": "^5.9.0"
+  },
+  "patchedDependencies": {
+    "llm-usage-extraction@0.3.0": "patches/llm-usage-extraction@0.3.0.patch"
   }
 }
